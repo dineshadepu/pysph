@@ -6,7 +6,8 @@ from pysph.sph.equation import Equation
 from pysph.sph.integrator_step import IntegratorStep
 import numpy as np
 import numpy
-from math import sqrt
+from math import sqrt, asin
+import math
 
 
 def skew(vec):
@@ -456,26 +457,19 @@ class RigidBodyForceGPUGems(Equation):
 
 class RigidBodyCollision(Equation):
     """Force between two spheres is implemented using DEM contact force law.
-
     Refer https://doi.org/10.1016/j.powtec.2011.09.019 for more
     information.
-
     Open-source MFIX-DEM software for gas–solids flows:
     Part I—Verification studies .
-
     """
     def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
         """Initialise the required coefficients for force calculation.
-
-
         Keyword arguments:
         kn -- Normal spring stiffness (default 1e3)
         mu -- friction coefficient (default 0.5)
         en -- coefficient of restitution (0.8)
-
         Given these coefficients, tangential spring stiffness, normal and
         tangential damping coefficient are calculated by default.
-
         """
         self.kn = kn
         self.kt = 2. / 7. * kn
@@ -570,6 +564,672 @@ class RigidBodyCollision(Equation):
             d_tang_disp_x[d_idx] = 0
             d_tang_disp_y[d_idx] = 0
             d_tang_disp_z[d_idx] = 0
+
+
+class RigidBodyCollisionStage1(Equation):
+    """Force between two spheres is implemented using DEM contact force law.
+
+    The force is modelled mostly from reference [1]. Some ideas are taken from
+    reference [2] and added it to the implementation of reference [1] to
+    make it complete.
+
+    [1] Multi-level modelling of dense gas-solid two phase flows. PhD Thesis,
+    Ye.
+    [2] Introduction to discrete element methods. Stefan Luding
+    https://pdfs.semanticscholar.org/ec8b/26e2d20b7d8a09d15f0e10660f0d02b4458d.pdf
+
+    """
+
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        """the required coefficients for force calculation.
+
+
+        Keyword arguments:
+        kn -- Normal spring stiffness (default 1e3)
+        mu -- friction coefficient (default 0.5)
+        en -- coefficient of restitution (0.8)
+
+        Given these coefficients, tangential spring stiffness, normal and
+        tangential damping coefficient are calculated by default.
+
+        """
+        self.kn = kn
+        self.kt = 2. / 7. * kn
+        self.en = en
+        self.mu = mu
+        super(RigidBodyCollisionStage1, self).__init__(dest, sources)
+
+    def loop(self, d_idx, d_m, d_wx, d_wy, d_wz, d_fx, d_fy, d_fz, d_torx,
+             d_tory, d_torz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0,
+             d_tng_z0, d_tng_idx, d_tng_idx_dem_id, d_total_tng_contacts,
+             d_dem_id, d_limit, d_vtx, d_vty, d_vtz, d_tng_nx, d_tng_ny,
+             d_tng_nz, d_tng_nx0, d_tng_ny0, d_tng_nz0, d_total_dem_entities,
+             VIJ, XIJ, RIJ, d_R, s_idx, s_R, s_wx, s_wy, s_wz, s_dem_id, dt):
+        if d_dem_id[d_idx] != s_dem_id[d_idx]:
+            overlap = -1.
+            # check the particles are not on top of each other.
+            if RIJ > 0:
+                overlap = d_R[d_idx] + s_R[s_idx] - RIJ
+
+            # d_idx has a range of tracking indices with sources
+            # starting index is p
+            p = declare('int')
+            # ending index is q -1
+            q = declare('int')
+            # total number of contacts of particle i in destination
+            tot_ctcs = declare('int')
+            tot_ctcs = d_total_tng_contacts[d_idx]
+            p = d_idx * d_limit[0]
+            q = p + tot_ctcs
+
+            i = declare('int')
+            found_at = declare('int')
+            found = declare('int')
+
+            # check if the particle is in the tracking list
+            # if so, then save the location at found_at
+            found = 0
+            for i in range(p, q):
+                if s_idx == d_tng_idx[i]:
+                    if s_dem_id[s_idx] == d_tng_idx_dem_id[i]:
+                        found_at = i
+                        found = 1
+                        break
+
+            # ---------- force computation starts ------------
+            # if particles are not overlapping
+            if overlap <= 0:
+                if found == 1:
+                    # make its tangential displacement to be zero
+                    d_tng_x0[found_at] = 0.
+                    d_tng_y0[found_at] = 0.
+                    d_tng_z0[found_at] = 0.
+
+                    d_tng_x[found_at] = 0.
+                    d_tng_y[found_at] = 0.
+                    d_tng_z[found_at] = 0.
+
+                    d_tng_nx[found_at] = 0.
+                    d_tng_ny[found_at] = 0.
+                    d_tng_nz[found_at] = 0.
+
+                    d_tng_nx0[found_at] = 0.
+                    d_tng_ny0[found_at] = 0.
+                    d_tng_nz0[found_at] = 0.
+
+                    d_vtx[found_at] = 0.
+                    d_vty[found_at] = 0.
+                    d_vtz[found_at] = 0.
+
+            # if particles are in contact
+            else:
+                # equation 2.8
+                # normal vector (nij) passing from d_idx to s_idx, i.e., i to j
+                rinv = 1.0 / RIJ
+                # in PySPH: XIJ[0] = d_x[d_idx] - s_x[s_idx]
+                nxc = -XIJ[0] * rinv
+                nyc = -XIJ[1] * rinv
+                nzc = -XIJ[2] * rinv
+
+                # ---- Relative velocity computation (Eq 2.9) ----
+                # relative velocity of particle d_idx w.r.t particle s_idx at
+                # contact point. The velocity difference provided by PySPH is
+                # only between translational velocities, but we need to
+                # consider rotational velocities also.
+
+                # Distance till contact point
+                a_i = d_R[d_idx] - overlap / 2.
+                a_j = s_R[s_idx] - overlap / 2.
+                # TODO: This has to be replaced by a custom cross product
+                # function
+                # wij = a_i * w_i + a_j * w_j
+                wijx = a_i * d_wx[d_idx] + a_j * s_wx[s_idx]
+                wijy = a_i * d_wy[d_idx] + a_j * s_wy[s_idx]
+                wijz = a_i * d_wz[d_idx] + a_j * s_wz[s_idx]
+                # wij \cross nij
+                wcn_x = wijy * nzc - wijz * nyc
+                wcn_y = wijz * nxc - wijx * nzc
+                wcn_z = wijx * nyc - wijy * nxc
+
+                vr_x = VIJ[0] + wcn_x
+                vr_y = VIJ[1] + wcn_y
+                vr_z = VIJ[2] + wcn_z
+
+                # normal velocity magnitude
+                vr_dot_nij = vr_x * nxc + vr_y * nyc + vr_z * nzc
+                vn_x = vr_dot_nij * nxc
+                vn_y = vr_dot_nij * nyc
+                vn_z = vr_dot_nij * nzc
+
+                # tangential velocity
+                vt_x = vr_x - vn_x
+                vt_y = vr_y - vn_y
+                vt_z = vr_z - vn_z
+
+                # normal force
+                kn_overlap = self.kn * overlap
+                fn_x = -kn_overlap * nxc - self.eta_n * vn_x
+                fn_y = -kn_overlap * nyc - self.eta_n * vn_y
+                fn_z = -kn_overlap * nzc - self.eta_n * vn_z
+
+                # ------------- tangential force computation ----------------
+                # if the particle is not been tracked then assign an index in
+                # tracking history.
+                if found == 0:
+                    found_at = q
+                    d_tng_idx[found_at] = s_idx
+                    d_total_tng_contacts[d_idx] += 1
+                    d_tng_idx_dem_id[found_at] = s_dem_id[s_idx]
+                    # compute and set the tangential acceleration for the
+                    # current time step
+                    d_vtx[found_at] = vt_x
+                    d_vty[found_at] = vt_y
+                    d_vtz[found_at] = vt_z
+                else:
+                    # current normal to the plane is nx, ny, nz
+                    # the tangential spring is oriented normal to
+                    # nxp, nyp, nzp
+                    nxp = d_tng_nx[found_at]
+                    nyp = d_tng_ny[found_at]
+                    nzp = d_tng_nz[found_at]
+                    # in order to compute the tangential force
+                    # rotate the spring for current plane
+                    # -------------------------
+                    # rotation of the spring
+                    # -------------------------
+                    # rotation matrix
+                    # n_current  \cross n_previous
+                    tmpx = nyc * nzp - nzc * nyp
+                    tmpy = nzc * nxp - nxc * nzp
+                    tmpz = nxc * nyp - nyc * nxp
+                    tmp_magn = (tmpx**2. + tmpy**2. + tmpz**2.)**0.5
+                    # normalized rotation vector
+                    hx = tmpx / tmp_magn
+                    hy = tmpy / tmp_magn
+                    hz = tmpz / tmp_magn
+
+                    phi = asin(tmp_magn)
+                    c = math.cos(phi)
+                    s = math.sin(phi)
+                    q = 1. - c
+
+                    # matrix corresponding to the rotation vector
+                    H0 = q * hx**2. + c
+                    H1 = q * hx * hy - s * hz
+                    H2 = q * hx * hz + s * hy
+
+                    H3 = q * hy * hx + s * hz
+                    H4 = q * hy**2. + c
+                    H5 = q * hy * hz - s * hx
+
+                    H6 = q * hz * hx - s * hy
+                    H7 = q * hz * hy + s * hx
+                    H8 = q * hz**2. + c
+
+                    # save the tangential displacement temporarily
+                    # will be used while rotation
+                    tmpx = d_tng_x[found_at]
+                    tmpy = d_tng_y[found_at]
+                    tmpz = d_tng_z[found_at]
+
+                    d_tng_x[found_at] = H0 * tmpx + H1 * tmpy + H2 * tmpz
+                    d_tng_y[found_at] = H3 * tmpx + H4 * tmpy + H5 * tmpz
+                    d_tng_z[found_at] = H6 * tmpx + H7 * tmpy + H8 * tmpz
+
+                    # save the current normal of the spring
+                    d_tng_nx[found_at] = nxc
+                    d_tng_ny[found_at] = nyc
+                    d_tng_nz[found_at] = nzc
+
+                    # compute and set the tangential acceleration for the
+                    # current time step
+                    d_vtx[found_at] = vt_x
+                    d_vty[found_at] = vt_y
+                    d_vtz[found_at] = vt_z
+
+                # find the tangential force from the tangential displacement
+                # and tangential velocity (eq 2.11 Thesis Ye)
+                ft0_x = -self.kt * d_tng_x[found_at] - self.eta_t * vt_x
+                ft0_y = -self.kt * d_tng_y[found_at] - self.eta_t * vt_y
+                ft0_z = -self.kt * d_tng_z[found_at] - self.eta_t * vt_z
+
+                # (*) check against Coulomb criterion
+                # Tangential force magnitude due to displacement
+                ft0_magn = (ft0_x * ft0_x + ft0_y * ft0_y + ft0_z * ft0_z)**(
+                    0.5)
+                fn_magn = (fn_x * fn_x + fn_y * fn_y + fn_z * fn_z)**(0.5)
+
+                # we have to compare with static friction, so
+                # this mu has to be static friction coefficient
+                fn_mu = self.mu * fn_magn
+
+                # if the tangential force magnitude is zero, then do nothing,
+                # else do following
+                if ft0_magn != 0.:
+                    # compare tangential force with the static friction
+                    if ft0_magn >= fn_mu:
+                        # rescale the tangential displacement
+                        tx = ft0_x / ft0_magn
+                        ty = ft0_y / ft0_magn
+                        tz = ft0_z / ft0_magn
+                        d_tng_x[found_at] = -self.kt_1 * (
+                            fn_mu * tx + self.eta_t * vt_x)
+                        d_tng_y[found_at] = -self.kt_1 * (
+                            fn_mu * ty + self.eta_t * vt_y)
+                        d_tng_z[found_at] = -self.kt_1 * (
+                            fn_mu * tz + self.eta_t * vt_z)
+
+                        # and also set the spring elongation
+                        # at time  t
+                        d_tng_x0[found_at] = d_tng_x[found_at]
+                        d_tng_y0[found_at] = d_tng_y[found_at]
+                        d_tng_z0[found_at] = d_tng_z[found_at]
+
+                        # save the current normal of the spring
+                        d_tng_nx0[found_at] = nxc
+                        d_tng_ny0[found_at] = nyc
+                        d_tng_nz0[found_at] = nzc
+
+                        # set the tangential force to static friction
+                        # from Coulomb criterion
+                        ft0_x = fn_mu * tx
+                        ft0_y = fn_mu * ty
+                        ft0_z = fn_mu * tz
+
+                d_fx[d_idx] += fn_x + ft0_x
+                d_fy[d_idx] += fn_y + ft0_y
+                d_fz[d_idx] += fn_z + ft0_z
+
+                d_torx[d_idx] += (ft0_y * nzc - ft0_z * nyc) * a_i
+                d_tory[d_idx] += (ft0_z * nxc - ft0_x * nzc) * a_i
+                d_torz[d_idx] += (ft0_x * nyc - ft0_y * nxc) * a_i
+
+
+class RigidBodyCollisionStage2(Equation):
+    """Force between two spheres is implemented using DEM contact force law.
+
+    The force is modelled mostly from reference [1]. Some ideas are taken from
+    reference [2] and added it to the implementation of reference [1] to
+    make it complete.
+
+    [1] Multi-level modelling of dense gas-solid two phase flows. PhD Thesis,
+    Ye.
+    [2] Introduction to discrete element methods. Stefan Luding
+    https://pdfs.semanticscholar.org/ec8b/26e2d20b7d8a09d15f0e10660f0d02b4458d.pdf
+
+    """
+
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        """the required coefficients for force calculation.
+
+
+        Keyword arguments:
+        kn -- Normal spring stiffness (default 1e3)
+        mu -- friction coefficient (default 0.5)
+        en -- coefficient of restitution (0.8)
+
+        Given these coefficients, tangential spring stiffness, normal and
+        tangential damping coefficient are calculated by default.
+
+        """
+        self.kn = kn
+        self.kt = 2. / 7. * kn
+        self.en = en
+        self.mu = mu
+        super(RigidBodyCollisionStage1, self).__init__(dest, sources)
+
+    def loop(self, d_idx, d_m, d_wx, d_wy, d_wz, d_fx, d_fy, d_fz, d_torx,
+             d_tory, d_torz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0,
+             d_tng_z0, d_tng_idx, d_tng_idx_dem_id, d_total_tng_contacts,
+             d_dem_id, d_limit, d_vtx, d_vty, d_vtz, d_tng_nx, d_tng_ny,
+             d_tng_nz, d_tng_nx0, d_tng_ny0, d_tng_nz0, d_total_dem_entities,
+             VIJ, XIJ, RIJ, d_R, s_idx, s_R, s_wx, s_wy, s_wz, s_dem_id, dt):
+        if d_dem_id[d_idx] != s_dem_id[d_idx]:
+            overlap = -1.
+            # check the particles are not on top of each other.
+            if RIJ > 0:
+                overlap = d_R[d_idx] + s_R[s_idx] - RIJ
+
+            # d_idx has a range of tracking indices with sources
+            # starting index is p
+            p = declare('int')
+            # ending index is q -1
+            q = declare('int')
+            # total number of contacts of particle i in destination
+            tot_ctcs = declare('int')
+            tot_ctcs = d_total_tng_contacts[d_idx]
+            p = d_idx * d_limit[0]
+            q = p + tot_ctcs
+
+            i = declare('int')
+            found_at = declare('int')
+            found = declare('int')
+
+            # check if the particle is in the tracking list
+            # if so, then save the location at found_at
+            found = 0
+            for i in range(p, q):
+                if s_idx == d_tng_idx[i]:
+                    if s_dem_id[s_idx] == d_tng_idx_dem_id[i]:
+                        found_at = i
+                        found = 1
+                        break
+
+            # ---------- force computation starts ------------
+            # if particles are not overlapping
+            if overlap <= 0:
+                if found == 1:
+                    # make its tangential displacement to be zero
+                    d_tng_x[found_at] = 0.
+                    d_tng_y[found_at] = 0.
+                    d_tng_z[found_at] = 0.
+
+                    d_tng_nx[found_at] = 0.
+                    d_tng_ny[found_at] = 0.
+                    d_tng_nz[found_at] = 0.
+
+                    d_vtx[found_at] = 0.
+                    d_vty[found_at] = 0.
+                    d_vtz[found_at] = 0.
+
+            # if particles are in contact
+            else:
+                # equation 2.8
+                # normal vector (nij) passing from d_idx to s_idx, i.e., i to j
+                rinv = 1.0 / RIJ
+                # in PySPH: XIJ[0] = d_x[d_idx] - s_x[s_idx]
+                nxc = -XIJ[0] * rinv
+                nyc = -XIJ[1] * rinv
+                nzc = -XIJ[2] * rinv
+
+                # ---- Relative velocity computation (Eq 2.9) ----
+                # relative velocity of particle d_idx w.r.t particle s_idx at
+                # contact point. The velocity difference provided by PySPH is
+                # only between translational velocities, but we need to
+                # consider rotational velocities also.
+
+                # Distance till contact point
+                a_i = d_R[d_idx] - overlap / 2.
+                a_j = s_R[s_idx] - overlap / 2.
+                # TODO: This has to be replaced by a custom cross product
+                # function
+                # wij = a_i * w_i + a_j * w_j
+                wijx = a_i * d_wx[d_idx] + a_j * s_wx[s_idx]
+                wijy = a_i * d_wy[d_idx] + a_j * s_wy[s_idx]
+                wijz = a_i * d_wz[d_idx] + a_j * s_wz[s_idx]
+                # wij \cross nij
+                wcn_x = wijy * nzc - wijz * nyc
+                wcn_y = wijz * nxc - wijx * nzc
+                wcn_z = wijx * nyc - wijy * nxc
+
+                vr_x = VIJ[0] + wcn_x
+                vr_y = VIJ[1] + wcn_y
+                vr_z = VIJ[2] + wcn_z
+
+                # normal velocity magnitude
+                vr_dot_nij = vr_x * nxc + vr_y * nyc + vr_z * nzc
+                vn_x = vr_dot_nij * nxc
+                vn_y = vr_dot_nij * nyc
+                vn_z = vr_dot_nij * nzc
+
+                # tangential velocity
+                vt_x = vr_x - vn_x
+                vt_y = vr_y - vn_y
+                vt_z = vr_z - vn_z
+
+                # normal force
+                kn_overlap = self.kn * overlap
+                fn_x = -kn_overlap * nxc - self.eta_n * vn_x
+                fn_y = -kn_overlap * nyc - self.eta_n * vn_y
+                fn_z = -kn_overlap * nzc - self.eta_n * vn_z
+
+                # ------------- tangential force computation ----------------
+                # if the particle is been tracked then only compute the
+                # tangential force.
+                if found == 1:
+                    # current normal to the plane is nx, ny, nz
+                    # the tangential spring is oriented normal to
+                    # nxp, nyp, nzp
+                    nxp = d_tng_nx[found_at]
+                    nyp = d_tng_ny[found_at]
+                    nzp = d_tng_nz[found_at]
+                    # in order to compute the tangential force
+                    # rotate the spring for current plane
+                    # -------------------------
+                    # rotation of the spring
+                    # -------------------------
+                    # rotation matrix
+                    # n_current  \cross n_previous
+                    tmpx = nyc * nzp - nzc * nyp
+                    tmpy = nzc * nxp - nxc * nzp
+                    tmpz = nxc * nyp - nyc * nxp
+                    tmp_magn = (tmpx**2. + tmpy**2. + tmpz**2.)**0.5
+                    # normalized rotation vector
+                    hx = tmpx / tmp_magn
+                    hy = tmpy / tmp_magn
+                    hz = tmpz / tmp_magn
+
+                    phi = asin(tmp_magn)
+                    c = math.cos(phi)
+                    s = math.sin(phi)
+                    q = 1. - c
+
+                    # matrix corresponding to the rotation vector
+                    H0 = q * hx**2. + c
+                    H1 = q * hx * hy - s * hz
+                    H2 = q * hx * hz + s * hy
+
+                    H3 = q * hy * hx + s * hz
+                    H4 = q * hy**2. + c
+                    H5 = q * hy * hz - s * hx
+
+                    H6 = q * hz * hx - s * hy
+                    H7 = q * hz * hy + s * hx
+                    H8 = q * hz**2. + c
+
+                    # save the tangential displacement temporarily
+                    # will be used while rotation
+                    tmpx = d_tng_x[found_at]
+                    tmpy = d_tng_y[found_at]
+                    tmpz = d_tng_z[found_at]
+
+                    d_tng_x[found_at] = H0 * tmpx + H1 * tmpy + H2 * tmpz
+                    d_tng_y[found_at] = H3 * tmpx + H4 * tmpy + H5 * tmpz
+                    d_tng_z[found_at] = H6 * tmpx + H7 * tmpy + H8 * tmpz
+
+                    # save the current normal of the spring
+                    d_tng_nx[found_at] = nxc
+                    d_tng_ny[found_at] = nyc
+                    d_tng_nz[found_at] = nzc
+
+                    # --------------------------------------
+                    # similarly rotate the tangential spring at time t
+                    # --------------------------------------
+                    # current normal to the plane is nx, ny, nz
+                    # the tangential spring is oriented normal to
+                    # nxp, nyp, nzp
+                    nxp = d_tng_nx0[found_at]
+                    nyp = d_tng_ny0[found_at]
+                    nzp = d_tng_nz0[found_at]
+                    # in order to compute the tangential force
+                    # rotate the spring for current plane
+                    # -------------------------
+                    # rotation of the spring
+                    # -------------------------
+                    # rotation matrix
+                    # n_current  \cross n_previous
+                    tmpx = nyc * nzp - nzc * nyp
+                    tmpy = nzc * nxp - nxc * nzp
+                    tmpz = nxc * nyp - nyc * nxp
+                    tmp_magn = (tmpx**2. + tmpy**2. + tmpz**2.)**0.5
+                    # normalized rotation vector
+                    hx = tmpx / tmp_magn
+                    hy = tmpy / tmp_magn
+                    hz = tmpz / tmp_magn
+
+                    phi = asin(tmp_magn)
+                    c = math.cos(phi)
+                    s = math.sin(phi)
+                    q = 1. - c
+
+                    # matrix corresponding to the rotation vector
+                    H0 = q * hx**2. + c
+                    H1 = q * hx * hy - s * hz
+                    H2 = q * hx * hz + s * hy
+
+                    H3 = q * hy * hx + s * hz
+                    H4 = q * hy**2. + c
+                    H5 = q * hy * hz - s * hx
+
+                    H6 = q * hz * hx - s * hy
+                    H7 = q * hz * hy + s * hx
+                    H8 = q * hz**2. + c
+
+                    # save the tangential displacement temporarily
+                    # will be used while rotation
+                    tmpx = d_tng_x0[found_at]
+                    tmpy = d_tng_y0[found_at]
+                    tmpz = d_tng_z0[found_at]
+
+                    d_tng_x0[found_at] = H0 * tmpx + H1 * tmpy + H2 * tmpz
+                    d_tng_y0[found_at] = H3 * tmpx + H4 * tmpy + H5 * tmpz
+                    d_tng_z0[found_at] = H6 * tmpx + H7 * tmpy + H8 * tmpz
+
+                    # save the current normal of the spring
+                    d_tng_nx0[found_at] = nxc
+                    d_tng_ny0[found_at] = nyc
+                    d_tng_nz0[found_at] = nzc
+
+                    # compute and set the tangential acceleration for the
+                    # current time step
+                    d_vtx[found_at] = vt_x
+                    d_vty[found_at] = vt_y
+                    d_vtz[found_at] = vt_z
+
+                # find the tangential force from the tangential displacement
+                # and tangential velocity (eq 2.11 Thesis Ye)
+                ft0_x = -self.kt * d_tng_x[found_at] - self.eta_t * vt_x
+                ft0_y = -self.kt * d_tng_y[found_at] - self.eta_t * vt_y
+                ft0_z = -self.kt * d_tng_z[found_at] - self.eta_t * vt_z
+
+                # (*) check against Coulomb criterion
+                # Tangential force magnitude due to displacement
+                ft0_magn = (ft0_x * ft0_x + ft0_y * ft0_y + ft0_z * ft0_z)**(
+                    0.5)
+                fn_magn = (fn_x * fn_x + fn_y * fn_y + fn_z * fn_z)**(0.5)
+
+                # we have to compare with static friction, so
+                # this mu has to be static friction coefficient
+                fn_mu = self.mu * fn_magn
+
+                # if the tangential force magnitude is zero, then do nothing,
+                # else do following
+                if ft0_magn != 0.:
+                    # compare tangential force with the static friction
+                    if ft0_magn >= fn_mu:
+                        # rescale the tangential displacement
+                        tx = ft0_x / ft0_magn
+                        ty = ft0_y / ft0_magn
+                        tz = ft0_z / ft0_magn
+                        d_tng_x[found_at] = -self.kt_1 * (
+                            fn_mu * tx + self.eta_t * vt_x)
+                        d_tng_y[found_at] = -self.kt_1 * (
+                            fn_mu * ty + self.eta_t * vt_y)
+                        d_tng_z[found_at] = -self.kt_1 * (
+                            fn_mu * tz + self.eta_t * vt_z)
+
+                        # set the tangential force to static friction
+                        # from Coulomb criterion
+                        ft0_x = fn_mu * tx
+                        ft0_y = fn_mu * ty
+                        ft0_z = fn_mu * tz
+
+                d_fx[d_idx] += fn_x + ft0_x
+                d_fy[d_idx] += fn_y + ft0_y
+                d_fz[d_idx] += fn_z + ft0_z
+
+                d_torx[d_idx] += (ft0_y * nzc - ft0_z * nyc) * a_i
+                d_tory[d_idx] += (ft0_z * nxc - ft0_x * nzc) * a_i
+                d_torz[d_idx] += (ft0_x * nyc - ft0_y * nxc) * a_i
+
+
+class UpdateTangentialContacts(Equation):
+    def loop_all(self, d_idx, d_x, d_y, d_z, d_R, d_total_dem_entities,
+                 d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x, d_tng_y,
+                 d_tng_z, d_tng_idx_dem_id, s_x, s_y, s_z, s_R, s_dem_id):
+        i = declare('int')
+        p = declare('int')
+        count = declare('int')
+        k = declare('int')
+        xij = declare('matrix(3)')
+        last_idx_tmp = declare('int')
+        sidx = declare('int')
+        dem_id = declare('int')
+        rij = 0.0
+
+        idx_total_ctcs = declare('int')
+        idx_total_ctcs = (
+            d_total_tng_contacts[d_total_dem_entities[0] * d_idx + i])
+        # particle idx contacts with entity i has range of indices
+        # and the first index would be
+        p = d_idx * d_limit[0]
+        last_idx_tmp = p + idx_total_ctcs - 1
+        k = p
+        count = 0
+
+        # loop over all the contacts of particle d_idx
+        while count < idx_total_ctcs:
+            # The index of the particle with which
+            # d_idx in contact is
+            sidx = d_tng_idx[k]
+            # get the dem id of the particle
+            dem_id = d_tng_idx_dem_id[k]
+
+            if sidx == -1:
+                break
+            else:
+                if dem_id == s_dem_id[sidx]:
+                    xij[0] = d_x[d_idx] - s_x[sidx]
+                    xij[1] = d_y[d_idx] - s_y[sidx]
+                    xij[2] = d_z[d_idx] - s_z[sidx]
+                    rij = sqrt(xij[0] * xij[0] + xij[1] * xij[1] +
+                               xij[2] * xij[2])
+
+                    overlap = d_R[d_idx] + s_R[sidx] - rij
+
+                    if overlap < 0.:
+                        # if the swap index is the current index then
+                        # simply make it to null contact.
+                        if k == last_idx_tmp:
+                            d_tng_idx[k] = -1
+                            d_tng_x[k] = 0.
+                            d_tng_y[k] = 0.
+                            d_tng_z[k] = 0.
+                        else:
+                            # swap the current tracking index with the final
+                            # contact index
+                            d_tng_idx[k] = d_tng_idx[last_idx_tmp]
+                            d_tng_idx[last_idx_tmp] = -1
+
+                            # swap tangential x displacement
+                            d_tng_x[k] = d_tng_x[last_idx_tmp]
+                            d_tng_x[last_idx_tmp] = 0.
+
+                            # swap tangential y displacement
+                            d_tng_y[k] = d_tng_x[last_idx_tmp]
+                            d_tng_y[last_idx_tmp] = 0.
+
+                            # swap tangential z displacement
+                            d_tng_z[k] = d_tng_z[last_idx_tmp]
+                            d_tng_z[last_idx_tmp] = 0.
+
+                            # decrease the last_idx_tmp, since we swapped it to
+                            # -1
+                            last_idx_tmp -= 1
+                    else:
+                        k = k + 1
+
+                    count += 1
 
 
 class RigidBodyWallCollision(Equation):
@@ -768,3 +1428,114 @@ class RK2StepRigidBody(IntegratorStep):
         d_x[d_idx] = d_x0[d_idx] + dt*d_u[d_idx]
         d_y[d_idx] = d_y0[d_idx] + dt*d_v[d_idx]
         d_z[d_idx] = d_z0[d_idx] + dt*d_w[d_idx]
+
+
+class RK2StepRigidBodyDEM(IntegratorStep):
+    def initialize(self, d_idx, d_x, d_y, d_z, d_x0, d_y0, d_z0, d_omega,
+                   d_omega0, d_vc, d_vc0, d_num_body, d_total_tng_contacts,
+                   d_limit, d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0,
+                   d_tng_z0, d_tng_nx, d_tng_ny, d_tng_nz, d_tng_nx0,
+                   d_tng_ny0, d_tng_nz0):
+        _i = declare('int')
+        _j = declare('int')
+        base = declare('int')
+        if d_idx == 0:
+            for _i in range(d_num_body[0]):
+                base = 3*_i
+                for _j in range(3):
+                    d_vc0[base + _j] = d_vc[base + _j]
+                    d_omega0[base + _j] = d_omega[base + _j]
+
+        d_x0[d_idx] = d_x[d_idx]
+        d_y0[d_idx] = d_y[d_idx]
+        d_z0[d_idx] = d_z[d_idx]
+
+        # -----------------------------------------------
+        # save the initial tangential contact information
+        # -----------------------------------------------
+        i = declare('int')
+        p = declare('int')
+        q = declare('int')
+        tot_ctcs = declare('int')
+        tot_ctcs = d_total_tng_contacts[d_idx]
+        p = d_idx * d_limit[0]
+        q = p + tot_ctcs
+
+        for i in range(p, q):
+            d_tng_x0[i] = d_tng_x[i]
+            d_tng_y0[i] = d_tng_y[i]
+            d_tng_z0[i] = d_tng_z[i]
+            d_tng_nx0[i] = d_tng_nx[i]
+            d_tng_ny0[i] = d_tng_ny[i]
+            d_tng_nz0[i] = d_tng_nz[i]
+
+    def stage1(self, d_idx, d_u, d_v, d_w, d_x, d_y, d_z, d_x0, d_y0, d_z0,
+               d_omega, d_omega_dot, d_vc, d_ac, d_omega0, d_vc0, d_num_body,
+               d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
+               d_vtx, d_vty, d_vtz, dt=0.0):
+        dtb2 = 0.5*dt
+        _i = declare('int')
+        j = declare('int')
+        base = declare('int')
+        if d_idx == 0:
+            for _i in range(d_num_body[0]):
+                base = 3*_i
+                for j in range(3):
+                    d_vc[base + j] = d_vc0[base + j] + d_ac[base + j]*dtb2
+                    d_omega[base + j] = (d_omega0[base + j] +
+                                         d_omega_dot[base + j]*dtb2)
+
+        d_x[d_idx] = d_x0[d_idx] + dtb2*d_u[d_idx]
+        d_y[d_idx] = d_y0[d_idx] + dtb2*d_v[d_idx]
+        d_z[d_idx] = d_z0[d_idx] + dtb2*d_w[d_idx]
+
+        # --------------------------------------
+        # increment the tangential displacement
+        # --------------------------------------
+        i = declare('int')
+        p = declare('int')
+        q = declare('int')
+        tot_ctcs = declare('int')
+        tot_ctcs = d_total_tng_contacts[d_idx]
+        p = d_idx * d_limit[0]
+        q = p + tot_ctcs
+
+        for i in range(p, q):
+            d_tng_x[i] += d_vtx[i] * dtb2
+            d_tng_y[i] += d_vty[i] * dtb2
+            d_tng_z[i] += d_vtz[i] * dtb2
+
+    def stage2(self, d_idx, d_u, d_v, d_w, d_x, d_y, d_z, d_x0, d_y0, d_z0,
+               d_omega, d_omega_dot, d_vc, d_ac, d_omega0, d_vc0, d_num_body,
+               d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
+               d_tng_x0, d_tng_y0, d_tng_z0, d_vtx, d_vty, d_vtz, dt=0.0):
+        _i = declare('int')
+        j = declare('int')
+        base = declare('int')
+        if d_idx == 0:
+            for _i in range(d_num_body[0]):
+                base = 3*_i
+                for j in range(3):
+                    d_vc[base + j] = d_vc0[base + j] + d_ac[base + j]*dt
+                    d_omega[base + j] = (d_omega0[base + j] +
+                                         d_omega_dot[base + j]*dt)
+
+        d_x[d_idx] = d_x0[d_idx] + dt*d_u[d_idx]
+        d_y[d_idx] = d_y0[d_idx] + dt*d_v[d_idx]
+        d_z[d_idx] = d_z0[d_idx] + dt*d_w[d_idx]
+
+        # --------------------------------------
+        # increment the tangential displacement
+        # --------------------------------------
+        i = declare('int')
+        p = declare('int')
+        q = declare('int')
+        tot_ctcs = declare('int')
+        tot_ctcs = d_total_tng_contacts[d_idx]
+        p = d_idx * d_limit[0]
+        q = p + tot_ctcs
+
+        for i in range(p, q):
+            d_tng_x[i] = d_tng_x0[i] + d_vtx[i] * dt
+            d_tng_y[i] = d_tng_y0[i] + d_vty[i] * dt
+            d_tng_z[i] = d_tng_z0[i] + d_vtz[i] * dt
