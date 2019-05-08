@@ -637,32 +637,8 @@ class RigidBodyCollisionStage1(Equation):
                         break
 
             # ---------- force computation starts ------------
-            # if particles are not overlapping
-            if overlap <= 0:
-                if found == 1:
-                    # make its tangential displacement to be zero
-                    d_tng_x0[found_at] = 0.
-                    d_tng_y0[found_at] = 0.
-                    d_tng_z0[found_at] = 0.
-
-                    d_tng_x[found_at] = 0.
-                    d_tng_y[found_at] = 0.
-                    d_tng_z[found_at] = 0.
-
-                    d_tng_nx[found_at] = 0.
-                    d_tng_ny[found_at] = 0.
-                    d_tng_nz[found_at] = 0.
-
-                    d_tng_nx0[found_at] = 0.
-                    d_tng_ny0[found_at] = 0.
-                    d_tng_nz0[found_at] = 0.
-
-                    d_vtx[found_at] = 0.
-                    d_vty[found_at] = 0.
-                    d_vtz[found_at] = 0.
-
-            # if particles are in contact
-            else:
+            # if particles are overlapping
+            if overlap > 0:
                 # equation 2.8
                 # normal vector (nij) passing from d_idx to s_idx, i.e., i to j
                 rinv = 1.0 / RIJ
@@ -680,7 +656,7 @@ class RigidBodyCollisionStage1(Equation):
                 # Distance till contact point
                 a_i = d_R[d_idx] - overlap / 2.
                 a_j = s_R[s_idx] - overlap / 2.
-                # TODO: This has to be replaced by a custom cross product
+                # TODO: THIS HAS TO BE REPLACED BY A CUSTOM CROSS PRODUCT
                 # function
                 # wij = a_i * w_i + a_j * w_j
                 wijx = a_i * d_wx[d_idx] + a_j * s_wx[s_idx]
@@ -705,6 +681,8 @@ class RigidBodyCollisionStage1(Equation):
                 vt_x = vr_x - vn_x
                 vt_y = vr_y - vn_y
                 vt_z = vr_z - vn_z
+                # magnitude of the tangential velocity
+                # vt_magn = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z)**0.5
 
                 # normal force
                 kn_overlap = self.kn * overlap
@@ -720,72 +698,12 @@ class RigidBodyCollisionStage1(Equation):
                     d_tng_idx[found_at] = s_idx
                     d_total_tng_contacts[d_idx] += 1
                     d_tng_idx_dem_id[found_at] = s_dem_id[s_idx]
-                    # compute and set the tangential acceleration for the
-                    # current time step
-                    d_vtx[found_at] = vt_x
-                    d_vty[found_at] = vt_y
-                    d_vtz[found_at] = vt_z
-                else:
-                    # current normal to the plane is nx, ny, nz
-                    # the tangential spring is oriented normal to
-                    # nxp, nyp, nzp
-                    nxp = d_tng_nx[found_at]
-                    nyp = d_tng_ny[found_at]
-                    nzp = d_tng_nz[found_at]
-                    # in order to compute the tangential force
-                    # rotate the spring for current plane
-                    # -------------------------
-                    # rotation of the spring
-                    # -------------------------
-                    # rotation matrix
-                    # n_current  \cross n_previous
-                    tmpx = nyc * nzp - nzc * nyp
-                    tmpy = nzc * nxp - nxc * nzp
-                    tmpz = nxc * nyp - nyc * nxp
-                    tmp_magn = (tmpx**2. + tmpy**2. + tmpz**2.)**0.5
-                    # normalized rotation vector
-                    hx = tmpx / tmp_magn
-                    hy = tmpy / tmp_magn
-                    hz = tmpz / tmp_magn
 
-                    phi = asin(tmp_magn)
-                    c = math.cos(phi)
-                    s = math.sin(phi)
-                    q = 1. - c
-
-                    # matrix corresponding to the rotation vector
-                    H0 = q * hx**2. + c
-                    H1 = q * hx * hy - s * hz
-                    H2 = q * hx * hz + s * hy
-
-                    H3 = q * hy * hx + s * hz
-                    H4 = q * hy**2. + c
-                    H5 = q * hy * hz - s * hx
-
-                    H6 = q * hz * hx - s * hy
-                    H7 = q * hz * hy + s * hx
-                    H8 = q * hz**2. + c
-
-                    # save the tangential displacement temporarily
-                    # will be used while rotation
-                    tmpx = d_tng_x[found_at]
-                    tmpy = d_tng_y[found_at]
-                    tmpz = d_tng_z[found_at]
-
-                    d_tng_x[found_at] = H0 * tmpx + H1 * tmpy + H2 * tmpz
-                    d_tng_y[found_at] = H3 * tmpx + H4 * tmpy + H5 * tmpz
-                    d_tng_z[found_at] = H6 * tmpx + H7 * tmpy + H8 * tmpz
-
-                    # save the current normal of the spring
-                    d_tng_nx[found_at] = nxc
-                    d_tng_ny[found_at] = nyc
-                    d_tng_nz[found_at] = nzc
-
-                    # compute and set the tangential acceleration for the
-                    # current time step
-                    d_vtx[found_at] = vt_x
-                    d_vty[found_at] = vt_y
-                    d_vtz[found_at] = vt_z
+                # compute and set the tangential acceleration for the
+                # current time step
+                d_vtx[found_at] = vt_x
+                d_vty[found_at] = vt_y
+                d_vtz[found_at] = vt_z
 
                 # find the tangential force from the tangential displacement
                 # and tangential velocity (eq 2.11 Thesis Ye)
@@ -809,9 +727,12 @@ class RigidBodyCollisionStage1(Equation):
                     # compare tangential force with the static friction
                     if ft0_magn >= fn_mu:
                         # rescale the tangential displacement
+                        # find the unit direction in tangential velocity
+                        # TODO: ELIMINATE THE SINGULARITY CASE
                         tx = ft0_x / ft0_magn
                         ty = ft0_y / ft0_magn
                         tz = ft0_z / ft0_magn
+                        # this taken from Luding paper [2], eq (21)
                         d_tng_x[found_at] = -self.kt_1 * (
                             fn_mu * tx + self.eta_t * vt_x)
                         d_tng_y[found_at] = -self.kt_1 * (
@@ -819,16 +740,11 @@ class RigidBodyCollisionStage1(Equation):
                         d_tng_z[found_at] = -self.kt_1 * (
                             fn_mu * tz + self.eta_t * vt_z)
 
-                        # and also set the spring elongation
-                        # at time  t
+                        # and also adjust the spring elongation
+                        # at time t, which is used at stage 2 integrator
                         d_tng_x0[found_at] = d_tng_x[found_at]
                         d_tng_y0[found_at] = d_tng_y[found_at]
                         d_tng_z0[found_at] = d_tng_z[found_at]
-
-                        # save the current normal of the spring
-                        d_tng_nx0[found_at] = nxc
-                        d_tng_ny0[found_at] = nyc
-                        d_tng_nz0[found_at] = nzc
 
                         # set the tangential force to static friction
                         # from Coulomb criterion
@@ -984,12 +900,15 @@ class RigidBodyCollisionStage2(Equation):
                 fn_z = -kn_overlap * nzc - self.eta_n * vn_z
 
                 # ------------- tangential force computation ----------------
-                # if the particle is been tracked then only compute the
-                # tangential force.
+                # do not add new particles to the contact list at step
+                # t + dt / 2. But normal force will be computed as above.
+
+                # Tangential force is computed if the particle is been tracked
+                # already
                 if found == 1:
                     # current normal to the plane is nx, ny, nz
                     # the tangential spring is oriented normal to
-                    # nxp, nyp, nzp
+                    # nxp, nyp, nzp (p is previous)
                     nxp = d_tng_nx[found_at]
                     nyp = d_tng_ny[found_at]
                     nzp = d_tng_nz[found_at]
@@ -1154,9 +1073,10 @@ class RigidBodyCollisionStage2(Equation):
 
 
 class UpdateTangentialContacts(Equation):
-    def loop_all(self, d_idx, d_x, d_y, d_z, d_R, d_total_dem_entities,
-                 d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x, d_tng_y,
-                 d_tng_z, d_tng_idx_dem_id, s_x, s_y, s_z, s_R, s_dem_id):
+    def initialize_pair(self, d_idx, d_x, d_y, d_z, d_R, d_total_dem_entities,
+                        d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x,
+                        d_tng_y, d_tng_z, d_tng_nx, d_tng_ny, d_tng_nz,
+                        d_tng_idx_dem_id, s_x, s_y, s_z, s_R, s_dem_id):
         i = declare('int')
         p = declare('int')
         count = declare('int')
@@ -1194,10 +1114,11 @@ class UpdateTangentialContacts(Equation):
                     xij[2] = d_z[d_idx] - s_z[sidx]
                     rij = sqrt(xij[0] * xij[0] + xij[1] * xij[1] +
                                xij[2] * xij[2])
+                    rinv = 1. / rij
 
                     overlap = d_R[d_idx] + s_R[sidx] - rij
 
-                    if overlap < 0.:
+                    if overlap <= 0.:
                         # if the swap index is the current index then
                         # simply make it to null contact.
                         if k == last_idx_tmp:
@@ -1227,6 +1148,70 @@ class UpdateTangentialContacts(Equation):
                             # -1
                             last_idx_tmp -= 1
                     else:
+                        # ----------------------------------------------------
+                        # this implies that the particles are still in contact
+                        # now rotate the tangential spring about the new plane
+                        # ----------------------------------------------------
+                        # current normal to the plane is nx, ny, nz
+                        # the tangential spring is oriented normal to
+                        # nxp, nyp, nzp
+                        nxp = d_tng_nx[k]
+                        nyp = d_tng_ny[k]
+                        nzp = d_tng_nz[k]
+                        # and current normal vector between the particles is
+                        nxc = -xij[0] * rinv
+                        nyc = -xij[1] * rinv
+                        nzc = -xij[2] * rinv
+
+                        # in order to compute the tangential force
+                        # rotate the spring for current plane
+                        # -------------------------
+                        # rotation of the spring
+                        # -------------------------
+                        # rotation matrix
+                        # n_current  \cross n_previous
+                        tmpx = nyc * nzp - nzc * nyp
+                        tmpy = nzc * nxp - nxc * nzp
+                        tmpz = nxc * nyp - nyc * nxp
+                        tmp_magn = (tmpx**2. + tmpy**2. + tmpz**2.)**0.5
+                        # normalized rotation vector
+                        hx = tmpx / tmp_magn
+                        hy = tmpy / tmp_magn
+                        hz = tmpz / tmp_magn
+
+                        phi = asin(tmp_magn)
+                        c = math.cos(phi)
+                        s = math.sin(phi)
+                        q = 1. - c
+
+                        # matrix corresponding to the rotation vector
+                        H0 = q * hx**2. + c
+                        H1 = q * hx * hy - s * hz
+                        H2 = q * hx * hz + s * hy
+
+                        H3 = q * hy * hx + s * hz
+                        H4 = q * hy**2. + c
+                        H5 = q * hy * hz - s * hx
+
+                        H6 = q * hz * hx - s * hy
+                        H7 = q * hz * hy + s * hx
+                        H8 = q * hz**2. + c
+
+                        # save the tangential displacement temporarily
+                        # will be used while rotation
+                        tmpx = d_tng_x[k]
+                        tmpy = d_tng_y[k]
+                        tmpz = d_tng_z[k]
+
+                        d_tng_x[k] = H0 * tmpx + H1 * tmpy + H2 * tmpz
+                        d_tng_y[k] = H3 * tmpx + H4 * tmpy + H5 * tmpz
+                        d_tng_z[k] = H6 * tmpx + H7 * tmpy + H8 * tmpz
+
+                        # save the current normal of the spring
+                        d_tng_nx[k] = nxc
+                        d_tng_ny[k] = nyc
+                        d_tng_nz[k] = nzc
+
                         k = k + 1
 
                     count += 1
