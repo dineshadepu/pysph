@@ -3,6 +3,7 @@
 """
 from pysph.base.reduce_array import parallel_reduce_array
 from pysph.sph.equation import Equation
+from pysph.base.utils import get_particle_array
 from pysph.sph.integrator_step import IntegratorStep
 import numpy as np
 import numpy
@@ -1051,9 +1052,8 @@ class UpdateTangentialContacts(Equation):
         rij = 0.0
 
         idx_total_ctcs = declare('int')
-        idx_total_ctcs = (
-            d_total_tng_contacts[d_total_dem_entities[0] * d_idx + i])
-        # particle idx contacts with entity i has range of indices
+        idx_total_ctcs = d_total_tng_contacts[d_idx]
+        # particle idx contacts has range of indices
         # and the first index would be
         p = d_idx * d_limit[0]
         last_idx_tmp = p + idx_total_ctcs - 1
@@ -1079,7 +1079,7 @@ class UpdateTangentialContacts(Equation):
                                xij[2] * xij[2])
                     rinv = 1. / rij
 
-                    overlap = d_R[d_idx] + s_R[sidx] - rij
+                    overlap = d_rad_s[d_idx] + s_rad_s[sidx] - rij
 
                     if overlap <= 0.:
                         # if the swap index is the current index then
@@ -1089,6 +1089,9 @@ class UpdateTangentialContacts(Equation):
                             d_tng_x[k] = 0.
                             d_tng_y[k] = 0.
                             d_tng_z[k] = 0.
+                            d_tng_nx[k] = 0.
+                            d_tng_ny[k] = 0.
+                            d_tng_nz[k] = 0.
                         else:
                             # swap the current tracking index with the final
                             # contact index
@@ -1107,9 +1110,24 @@ class UpdateTangentialContacts(Equation):
                             d_tng_z[k] = d_tng_z[last_idx_tmp]
                             d_tng_z[last_idx_tmp] = 0.
 
+                            # swap tangential nx orientation
+                            d_tng_nx[k] = d_tng_nx[last_idx_tmp]
+                            d_tng_nx[last_idx_tmp] = 0.
+
+                            # swap tangential ny orientation
+                            d_tng_ny[k] = d_tng_nx[last_idx_tmp]
+                            d_tng_ny[last_idx_tmp] = 0.
+
+                            # swap tangential nz orientation
+                            d_tng_nz[k] = d_tng_nz[last_idx_tmp]
+                            d_tng_nz[last_idx_tmp] = 0.
+
                             # decrease the last_idx_tmp, since we swapped it to
                             # -1
                             last_idx_tmp -= 1
+
+                        # decrement the total contacts of the particle
+                        d_total_tng_contacts[d_idx] -= 1
                     else:
                         # ----------------------------------------------------
                         # this implies that the particles are still in contact
@@ -1176,8 +1194,9 @@ class UpdateTangentialContacts(Equation):
                         d_tng_nz[k] = nzc
 
                         k = k + 1
-
-                    count += 1
+                else:
+                    k = k + 1
+                count += 1
 
 
 class RigidBodyWallCollision(Equation):
@@ -1376,6 +1395,95 @@ class RK2StepRigidBody(IntegratorStep):
         d_x[d_idx] = d_x0[d_idx] + dt*d_u[d_idx]
         d_y[d_idx] = d_y0[d_idx] + dt*d_v[d_idx]
         d_z[d_idx] = d_z0[d_idx] + dt*d_w[d_idx]
+
+
+def get_particle_array_rigid_body_dem(constants=None, **props):
+    """Return a particle array for a rigid body motion.
+
+    For multiple bodies, add a body_id property starting at index 0 with each
+    index denoting the body to which the particle corresponds to.
+
+    Parameters
+    ----------
+    constants : dict
+        Dictionary of constants
+
+    Other Parameters
+    ----------------
+    props : dict
+        Additional keywords passed are set as the property arrays.
+
+    See Also
+    --------
+    get_particle_array
+
+    """
+    extra_props = [
+        'au', 'av', 'aw', 'V', 'fx', 'fy', 'fz',
+        'x0', 'y0', 'z0',
+        'rad_s', 'dem_id', 'nx', 'ny', 'nz'
+    ]
+
+    body_id = props.pop('body_id', None)
+    nb = 1 if body_id is None else numpy.max(body_id) + 1
+
+    consts = {
+        'total_mass': numpy.zeros(nb, dtype=float),
+        'num_body': numpy.asarray(nb, dtype=int),
+        'cm': numpy.zeros(3 * nb, dtype=float),
+
+        # The mi are also used to temporarily reduce mass (1), center of
+        # mass (3) and the interia components (6), total force (3), total
+        # torque (3).
+        'mi': numpy.zeros(16 * nb, dtype=float),
+        'force': numpy.zeros(3 * nb, dtype=float),
+        'torque': numpy.zeros(3 * nb, dtype=float),
+        # velocity, acceleration of CM.
+        'vc': numpy.zeros(3 * nb, dtype=float),
+        'ac': numpy.zeros(3 * nb, dtype=float),
+        'vc0': numpy.zeros(3 * nb, dtype=float),
+        # angular velocity, acceleration of body.
+        'omega': numpy.zeros(3 * nb, dtype=float),
+        'omega0': numpy.zeros(3 * nb, dtype=float),
+        'omega_dot': numpy.zeros(3 * nb, dtype=float)
+    }
+    if constants:
+        consts.update(constants)
+    pa = get_particle_array(constants=consts, additional_props=extra_props,
+                            **props)
+    pa.add_property('body_id', type='int', data=body_id)
+    pa.dem_id = pa.body_id
+
+    # create the array to save the tangential interaction particles
+    # index and other variables
+    limit = 30
+
+    pa.add_constant('limit', limit)
+    pa.add_constant('tng_idx', [-1] * limit * len(pa.x))
+    pa.add_constant('tng_idx_dem_id', [-1] * limit * len(pa.x))
+    pa.add_constant('tng_x', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_y', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_z', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_x0', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_y0', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_z0', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_nx', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_ny', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_nz', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_nx0', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_ny0', [0.] * limit * len(pa.x))
+    pa.add_constant('tng_nz0', [0.] * limit * len(pa.x))
+    pa.add_constant('vtx', [0.] * limit * len(pa.x))
+    pa.add_constant('vty', [0.] * limit * len(pa.x))
+    pa.add_constant('vtz', [0.] * limit * len(pa.x))
+    pa.add_constant('total_tng_contacts', [0] * len(pa.x))
+
+    pa.set_output_arrays([
+        'x', 'y', 'z', 'u', 'v', 'w', 'rho', 'h', 'm', 'p', 'pid', 'au', 'av',
+        'aw', 'tag', 'gid', 'V', 'fx', 'fy', 'fz', 'body_id'
+    ])
+
+    return pa
 
 
 class RK2StepRigidBodyDEM(IntegratorStep):
