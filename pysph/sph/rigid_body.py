@@ -599,17 +599,17 @@ class RigidBodyCollisionStage1(Equation):
         self.mu = mu
         super(RigidBodyCollisionStage1, self).__init__(dest, sources)
 
-    def loop(self, d_idx, d_m, d_wx, d_wy, d_wz, d_fx, d_fy, d_fz, d_torx,
-             d_tory, d_torz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0,
+    def loop(self, d_idx, d_m, d_fx, d_fy, d_fz,
+             d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0,
              d_tng_z0, d_tng_idx, d_tng_idx_dem_id, d_total_tng_contacts,
              d_dem_id, d_limit, d_vtx, d_vty, d_vtz, d_tng_nx, d_tng_ny,
-             d_tng_nz, d_tng_nx0, d_tng_ny0, d_tng_nz0, d_total_dem_entities,
-             VIJ, XIJ, RIJ, d_R, s_idx, s_R, s_wx, s_wy, s_wz, s_dem_id, dt):
+             d_tng_nz, d_tng_nx0, d_tng_ny0, d_tng_nz0,
+             VIJ, XIJ, RIJ, d_rad_s, s_idx, s_rad_s, s_dem_id, dt):
         if d_dem_id[d_idx] != s_dem_id[d_idx]:
             overlap = -1.
             # check the particles are not on top of each other.
             if RIJ > 0:
-                overlap = d_R[d_idx] + s_R[s_idx] - RIJ
+                overlap = d_R[d_idx] + s_rad_s[s_idx] - RIJ
 
             # d_idx has a range of tracking indices with sources
             # starting index is p
@@ -650,26 +650,12 @@ class RigidBodyCollisionStage1(Equation):
                 # ---- Relative velocity computation (Eq 2.9) ----
                 # relative velocity of particle d_idx w.r.t particle s_idx at
                 # contact point. The velocity difference provided by PySPH is
-                # only between translational velocities, but we need to
-                # consider rotational velocities also.
+                # only between translational velocities. We don't need to
+                # consider rotational velocities
 
-                # Distance till contact point
-                a_i = d_R[d_idx] - overlap / 2.
-                a_j = s_R[s_idx] - overlap / 2.
-                # TODO: THIS HAS TO BE REPLACED BY A CUSTOM CROSS PRODUCT
-                # function
-                # wij = a_i * w_i + a_j * w_j
-                wijx = a_i * d_wx[d_idx] + a_j * s_wx[s_idx]
-                wijy = a_i * d_wy[d_idx] + a_j * s_wy[s_idx]
-                wijz = a_i * d_wz[d_idx] + a_j * s_wz[s_idx]
-                # wij \cross nij
-                wcn_x = wijy * nzc - wijz * nyc
-                wcn_y = wijz * nxc - wijx * nzc
-                wcn_z = wijx * nyc - wijy * nxc
-
-                vr_x = VIJ[0] + wcn_x
-                vr_y = VIJ[1] + wcn_y
-                vr_z = VIJ[2] + wcn_z
+                vr_x = VIJ[0]
+                vr_y = VIJ[1]
+                vr_z = VIJ[2]
 
                 # normal velocity magnitude
                 vr_dot_nij = vr_x * nxc + vr_y * nyc + vr_z * nzc
@@ -756,10 +742,6 @@ class RigidBodyCollisionStage1(Equation):
                 d_fy[d_idx] += fn_y + ft0_y
                 d_fz[d_idx] += fn_z + ft0_z
 
-                d_torx[d_idx] += (ft0_y * nzc - ft0_z * nyc) * a_i
-                d_tory[d_idx] += (ft0_z * nxc - ft0_x * nzc) * a_i
-                d_torz[d_idx] += (ft0_x * nyc - ft0_y * nxc) * a_i
-
 
 class RigidBodyCollisionStage2(Equation):
     """Force between two spheres is implemented using DEM contact force law.
@@ -792,19 +774,20 @@ class RigidBodyCollisionStage2(Equation):
         self.kt = 2. / 7. * kn
         self.en = en
         self.mu = mu
-        super(RigidBodyCollisionStage1, self).__init__(dest, sources)
+        super(RigidBodyCollisionStage2, self).__init__(dest, sources)
 
-    def loop(self, d_idx, d_m, d_wx, d_wy, d_wz, d_fx, d_fy, d_fz, d_torx,
-             d_tory, d_torz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0,
+    def loop(self, d_idx, d_m, d_fx, d_fy, d_fz,
+             d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0,
              d_tng_z0, d_tng_idx, d_tng_idx_dem_id, d_total_tng_contacts,
              d_dem_id, d_limit, d_vtx, d_vty, d_vtz, d_tng_nx, d_tng_ny,
-             d_tng_nz, d_tng_nx0, d_tng_ny0, d_tng_nz0, d_total_dem_entities,
-             VIJ, XIJ, RIJ, d_R, s_idx, s_R, s_wx, s_wy, s_wz, s_dem_id, dt):
+             d_tng_nz, d_tng_nx0, d_tng_ny0, d_tng_nz0,
+             VIJ, XIJ, RIJ, d_rad_s, s_idx, s_rad_s,
+             s_dem_id, dt):
         if d_dem_id[d_idx] != s_dem_id[d_idx]:
             overlap = -1.
             # check the particles are not on top of each other.
             if RIJ > 0:
-                overlap = d_R[d_idx] + s_R[s_idx] - RIJ
+                overlap = d_rad_s[d_idx] + s_rad_s[s_idx] - RIJ
 
             # d_idx has a range of tracking indices with sources
             # starting index is p
@@ -861,26 +844,11 @@ class RigidBodyCollisionStage2(Equation):
                 # ---- Relative velocity computation (Eq 2.9) ----
                 # relative velocity of particle d_idx w.r.t particle s_idx at
                 # contact point. The velocity difference provided by PySPH is
-                # only between translational velocities, but we need to
-                # consider rotational velocities also.
-
-                # Distance till contact point
-                a_i = d_R[d_idx] - overlap / 2.
-                a_j = s_R[s_idx] - overlap / 2.
-                # TODO: This has to be replaced by a custom cross product
-                # function
-                # wij = a_i * w_i + a_j * w_j
-                wijx = a_i * d_wx[d_idx] + a_j * s_wx[s_idx]
-                wijy = a_i * d_wy[d_idx] + a_j * s_wy[s_idx]
-                wijz = a_i * d_wz[d_idx] + a_j * s_wz[s_idx]
-                # wij \cross nij
-                wcn_x = wijy * nzc - wijz * nyc
-                wcn_y = wijz * nxc - wijx * nzc
-                wcn_z = wijx * nyc - wijy * nxc
-
-                vr_x = VIJ[0] + wcn_x
-                vr_y = VIJ[1] + wcn_y
-                vr_z = VIJ[2] + wcn_z
+                # only between translational velocities. We don' need angular
+                # velocity since particles are rigid and won't rotate.
+                vr_x = VIJ[0]
+                vr_y = VIJ[1]
+                vr_z = VIJ[2]
 
                 # normal velocity magnitude
                 vr_dot_nij = vr_x * nxc + vr_y * nyc + vr_z * nzc
@@ -1067,17 +1035,12 @@ class RigidBodyCollisionStage2(Equation):
                 d_fy[d_idx] += fn_y + ft0_y
                 d_fz[d_idx] += fn_z + ft0_z
 
-                d_torx[d_idx] += (ft0_y * nzc - ft0_z * nyc) * a_i
-                d_tory[d_idx] += (ft0_z * nxc - ft0_x * nzc) * a_i
-                d_torz[d_idx] += (ft0_x * nyc - ft0_y * nxc) * a_i
-
 
 class UpdateTangentialContacts(Equation):
-    def initialize_pair(self, d_idx, d_x, d_y, d_z, d_R, d_total_dem_entities,
+    def initialize_pair(self, d_idx, d_x, d_y, d_z, d_rad_s,
                         d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x,
                         d_tng_y, d_tng_z, d_tng_nx, d_tng_ny, d_tng_nz,
-                        d_tng_idx_dem_id, s_x, s_y, s_z, s_R, s_dem_id):
-        i = declare('int')
+                        d_tng_idx_dem_id, s_x, s_y, s_z, s_rad_s, s_dem_id):
         p = declare('int')
         count = declare('int')
         k = declare('int')
