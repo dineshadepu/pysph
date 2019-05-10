@@ -7,8 +7,7 @@ from pysph.base.utils import get_particle_array
 from pysph.sph.integrator_step import IntegratorStep
 import numpy as np
 import numpy
-from math import sqrt, asin
-import math
+from math import sqrt, asin, sin, cos, pi
 
 
 def skew(vec):
@@ -610,7 +609,7 @@ class RigidBodyCollisionStage1(Equation):
             overlap = -1.
             # check the particles are not on top of each other.
             if RIJ > 0:
-                overlap = d_R[d_idx] + s_rad_s[s_idx] - RIJ
+                overlap = d_rad_s[d_idx] + s_rad_s[s_idx] - RIJ
 
             # d_idx has a range of tracking indices with sources
             # starting index is p
@@ -898,8 +897,8 @@ class RigidBodyCollisionStage2(Equation):
                     hz = tmpz / tmp_magn
 
                     phi = asin(tmp_magn)
-                    c = math.cos(phi)
-                    s = math.sin(phi)
+                    c = cos(phi)
+                    s = sin(phi)
                     q = 1. - c
 
                     # matrix corresponding to the rotation vector
@@ -956,8 +955,8 @@ class RigidBodyCollisionStage2(Equation):
                     hz = tmpz / tmp_magn
 
                     phi = asin(tmp_magn)
-                    c = math.cos(phi)
-                    s = math.sin(phi)
+                    c = cos(phi)
+                    s = sin(phi)
                     q = 1. - c
 
                     # matrix corresponding to the rotation vector
@@ -1161,8 +1160,8 @@ class UpdateTangentialContacts(Equation):
                         hz = tmpz / tmp_magn
 
                         phi = asin(tmp_magn)
-                        c = math.cos(phi)
-                        s = math.sin(phi)
+                        c = cos(phi)
+                        s = sin(phi)
                         q = 1. - c
 
                         # matrix corresponding to the rotation vector
@@ -1421,11 +1420,13 @@ def get_particle_array_rigid_body_dem(constants=None, **props):
     extra_props = [
         'au', 'av', 'aw', 'V', 'fx', 'fy', 'fz',
         'x0', 'y0', 'z0',
-        'rad_s', 'dem_id', 'nx', 'ny', 'nz'
+        'rad_s', 'nx', 'ny', 'nz'
     ]
 
     body_id = props.pop('body_id', None)
     nb = 1 if body_id is None else numpy.max(body_id) + 1
+
+    dem_id = props.pop('dem_id', None)
 
     consts = {
         'total_mass': numpy.zeros(nb, dtype=float),
@@ -1452,7 +1453,7 @@ def get_particle_array_rigid_body_dem(constants=None, **props):
     pa = get_particle_array(constants=consts, additional_props=extra_props,
                             **props)
     pa.add_property('body_id', type='int', data=body_id)
-    pa.dem_id = pa.body_id
+    pa.add_property('dem_id', type='int', data=dem_id)
 
     # create the array to save the tangential interaction particles
     # index and other variables

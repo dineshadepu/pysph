@@ -20,7 +20,8 @@ from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
 from pysph.sph.rigid_body import (
     BodyForce, RK2StepRigidBody, RigidBodyCollision, RigidBodyCollisionStage2,
-    RigidBodyCollisionStage1, RigidBodyMoments, RigidBodyMotion, get_particle_array_rigid_body_dem)
+    RigidBodyCollisionStage1, RigidBodyMoments, RigidBodyMotion,
+    get_particle_array_rigid_body_dem, RigidBodyCollisionNoHistory)
 from pysph.tools.geometry import (get_2d_tank)
 
 
@@ -90,14 +91,13 @@ class ZhangStackOfCylinders(Application):
         dam = get_particle_array_rigid_body_dem(
             x=xd, y=yd, h=h, m=m, rho=self.dam_rho,
             rad_s=self.dam_spacing / 2., V=self.dam_spacing**2, name="dam",
-            dem_id=max(body_id)+1)
-        print(dam.dem_id)
+            dem_id=max(body_id) + 1)
 
         xw, yw = self.create_wall()
         wall = get_particle_array_rigid_body_dem(
             x=xw, y=yw, h=h, m=m, rho=self.wall_rho,
             rad_s=self.wall_spacing / 2., V=self.wall_spacing**2, name="wall",
-            dem_id=max(body_id)+2)
+            dem_id=max(body_id) + 2)
         wall.x -= 0.005
         return [cylinders, dam, wall]
 
@@ -115,42 +115,13 @@ class ZhangStackOfCylinders(Application):
         return solver
 
     def create_equations(self):
-        stage1 = [
-            Group(
-                equations=[
-                    BodyForce(dest='cylinders', sources=None, gy=-9.81),
-                ], real=False),
-            Group(equations=[
-                RigidBodyCollisionStage1(dest='cylinders', sources=[
-                    'dam', 'wall', 'cylinders'
-                ], kn=1e7, en=0.5),
-            ]),
-            Group(equations=[RigidBodyMoments(dest='body', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='body', sources=None)]),
-        ]
-
-        stage2 = [
-            Group(
-                equations=[
-                    BodyForce(dest='cylinders', sources=None, gy=-9.81),
-                ], real=False),
-            Group(equations=[
-                RigidBodyCollisionStage2(dest='cylinders', sources=[
-                    'dam', 'wall', 'cylinders'
-                ], kn=1e7, en=0.5),
-            ]),
-            Group(equations=[RigidBodyMoments(dest='body', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='body', sources=None)]),
-        ]
-        return MultiStageEquations([stage1, stage2])
-
-        # equations = [
+        # stage1 = [
         #     Group(
         #         equations=[
         #             BodyForce(dest='cylinders', sources=None, gy=-9.81),
         #         ], real=False),
         #     Group(equations=[
-        #         RigidBodyCollision(dest='cylinders', sources=[
+        #         RigidBodyCollisionStage1(dest='cylinders', sources=[
         #             'dam', 'wall', 'cylinders'
         #         ], kn=1e7, en=0.5),
         #     ]),
@@ -158,7 +129,38 @@ class ZhangStackOfCylinders(Application):
         #         equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
         #     Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
         # ]
-        # return equations
+
+        # stage2 = [
+        #     Group(
+        #         equations=[
+        #             BodyForce(dest='cylinders', sources=None, gy=-9.81),
+        #         ], real=False),
+        #     Group(equations=[
+        #         RigidBodyCollisionStage2(dest='cylinders', sources=[
+        #             'dam', 'wall', 'cylinders'
+        #         ], kn=1e7, en=0.5),
+        #     ]),
+        #     Group(
+        #         equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
+        #     Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
+        # ]
+        # return MultiStageEquations([stage1, stage2])
+
+        equations = [
+            Group(
+                equations=[
+                    BodyForce(dest='cylinders', sources=None, gy=-9.81),
+                ], real=False),
+            Group(equations=[
+                RigidBodyCollisionNoHistory(dest='cylinders', sources=[
+                    'dam', 'wall', 'cylinders'
+                ], kn=1e7, en=0.5),
+            ]),
+            Group(
+                equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
+            Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
+        ]
+        return equations
 
     def create_dam(self):
         xt, yt = get_2d_tank(self.dam_spacing,
