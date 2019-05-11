@@ -7,7 +7,7 @@ from pysph.base.utils import get_particle_array
 from pysph.sph.integrator_step import IntegratorStep
 import numpy as np
 import numpy
-from math import sqrt, asin, sin, cos, pi
+from math import sqrt, asin, sin, cos, pi, log
 
 
 def skew(vec):
@@ -595,7 +595,9 @@ class RigidBodyCollisionStage1(Equation):
         """
         self.kn = kn
         self.kt = 2. / 7. * kn
+        self.kt_1 = 1. / self.kt
         self.en = en
+        self.et = 0.5 * self.en
         self.mu = mu
         super(RigidBodyCollisionStage1, self).__init__(dest, sources)
 
@@ -604,32 +606,29 @@ class RigidBodyCollisionStage1(Equation):
              d_tng_z0, d_tng_idx, d_tng_idx_dem_id, d_total_tng_contacts,
              d_dem_id, d_limit, d_vtx, d_vty, d_vtz, d_tng_nx, d_tng_ny,
              d_tng_nz, d_tng_nx0, d_tng_ny0, d_tng_nz0,
-             VIJ, XIJ, RIJ, d_rad_s, s_idx, s_rad_s, s_dem_id, dt):
-        if d_dem_id[d_idx] != s_dem_id[d_idx]:
+             VIJ, XIJ, RIJ, d_rad_s, s_idx, s_m, s_rad_s, s_dem_id,
+             dt):
+        p, q1, tot_ctcs, i, found_at, found = declare('int', 6)
+
+        if d_dem_id[d_idx] != s_dem_id[s_idx]:
             overlap = -1.
             # check the particles are not on top of each other.
             if RIJ > 0:
                 overlap = d_rad_s[d_idx] + s_rad_s[s_idx] - RIJ
 
+            # total number of contacts of particle i in destination
+            tot_ctcs = d_total_tng_contacts[d_idx]
+
             # d_idx has a range of tracking indices with sources
             # starting index is p
-            p = declare('int')
-            # ending index is q -1
-            q = declare('int')
-            # total number of contacts of particle i in destination
-            tot_ctcs = declare('int')
-            tot_ctcs = d_total_tng_contacts[d_idx]
             p = d_idx * d_limit[0]
-            q = p + tot_ctcs
-
-            i = declare('int')
-            found_at = declare('int')
-            found = declare('int')
+            # ending index is q -1
+            q1 = p + tot_ctcs
 
             # check if the particle is in the tracking list
             # if so, then save the location at found_at
             found = 0
-            for i in range(p, q):
+            for i in range(p, q1):
                 if s_idx == d_tng_idx[i]:
                     if s_dem_id[s_idx] == d_tng_idx_dem_id[i]:
                         found_at = i
@@ -670,17 +669,23 @@ class RigidBodyCollisionStage1(Equation):
                 # magnitude of the tangential velocity
                 # vt_magn = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z)**0.5
 
+                # compute the damping constants
+                m_eff = d_m[d_idx] * s_m[s_idx] / (d_m[d_idx] + s_m[s_idx])
+                log_en = log(self.en)
+                eta_n = -2. * log_en * sqrt(m_eff * self.kn) / sqrt(
+                    pi**2. + log_en**2.)
+
                 # normal force
                 kn_overlap = self.kn * overlap
-                fn_x = -kn_overlap * nxc - self.eta_n * vn_x
-                fn_y = -kn_overlap * nyc - self.eta_n * vn_y
-                fn_z = -kn_overlap * nzc - self.eta_n * vn_z
+                fn_x = -kn_overlap * nxc - eta_n * vn_x
+                fn_y = -kn_overlap * nyc - eta_n * vn_y
+                fn_z = -kn_overlap * nzc - eta_n * vn_z
 
                 # ------------- tangential force computation ----------------
                 # if the particle is not been tracked then assign an index in
                 # tracking history.
                 if found == 0:
-                    found_at = q
+                    found_at = q1
                     d_tng_idx[found_at] = s_idx
                     d_total_tng_contacts[d_idx] += 1
                     d_tng_idx_dem_id[found_at] = s_dem_id[s_idx]
@@ -691,11 +696,17 @@ class RigidBodyCollisionStage1(Equation):
                 d_vty[found_at] = vt_y
                 d_vtz[found_at] = vt_z
 
+                # compute the damping constants
+                m_eff_t = 2. / 7. * m_eff
+                log_et = log(self.et)
+                eta_t = -2. * log_en * sqrt(m_eff_t * self.kn) / sqrt(
+                    pi**2. + log_et**2.)
+
                 # find the tangential force from the tangential displacement
                 # and tangential velocity (eq 2.11 Thesis Ye)
-                ft0_x = -self.kt * d_tng_x[found_at] - self.eta_t * vt_x
-                ft0_y = -self.kt * d_tng_y[found_at] - self.eta_t * vt_y
-                ft0_z = -self.kt * d_tng_z[found_at] - self.eta_t * vt_z
+                ft0_x = -self.kt * d_tng_x[found_at] - eta_t * vt_x
+                ft0_y = -self.kt * d_tng_y[found_at] - eta_t * vt_y
+                ft0_z = -self.kt * d_tng_z[found_at] - eta_t * vt_z
 
                 # (*) check against Coulomb criterion
                 # Tangential force magnitude due to displacement
@@ -720,11 +731,11 @@ class RigidBodyCollisionStage1(Equation):
                         tz = ft0_z / ft0_magn
                         # this taken from Luding paper [2], eq (21)
                         d_tng_x[found_at] = -self.kt_1 * (
-                            fn_mu * tx + self.eta_t * vt_x)
+                            fn_mu * tx + eta_t * vt_x)
                         d_tng_y[found_at] = -self.kt_1 * (
-                            fn_mu * ty + self.eta_t * vt_y)
+                            fn_mu * ty + eta_t * vt_y)
                         d_tng_z[found_at] = -self.kt_1 * (
-                            fn_mu * tz + self.eta_t * vt_z)
+                            fn_mu * tz + eta_t * vt_z)
 
                         # and also adjust the spring elongation
                         # at time t, which is used at stage 2 integrator
@@ -772,7 +783,9 @@ class RigidBodyCollisionStage2(Equation):
         """
         self.kn = kn
         self.kt = 2. / 7. * kn
+        self.kt_1 = 1. / self.kt
         self.en = en
+        self.et = 0.5 * self.en
         self.mu = mu
         super(RigidBodyCollisionStage2, self).__init__(dest, sources)
 
@@ -781,33 +794,28 @@ class RigidBodyCollisionStage2(Equation):
              d_tng_z0, d_tng_idx, d_tng_idx_dem_id, d_total_tng_contacts,
              d_dem_id, d_limit, d_vtx, d_vty, d_vtz, d_tng_nx, d_tng_ny,
              d_tng_nz, d_tng_nx0, d_tng_ny0, d_tng_nz0,
-             VIJ, XIJ, RIJ, d_rad_s, s_idx, s_rad_s,
+             VIJ, XIJ, RIJ, d_rad_s, s_idx, s_rad_s, s_m,
              s_dem_id, dt):
+        p, q1, tot_ctcs, i, found_at, found = declare('int', 6)
         if d_dem_id[d_idx] != s_dem_id[d_idx]:
             overlap = -1.
             # check the particles are not on top of each other.
             if RIJ > 0:
                 overlap = d_rad_s[d_idx] + s_rad_s[s_idx] - RIJ
 
+            # total number of contacts of particle i in destination
+            tot_ctcs = d_total_tng_contacts[d_idx]
+
             # d_idx has a range of tracking indices with sources
             # starting index is p
-            p = declare('int')
-            # ending index is q -1
-            q = declare('int')
-            # total number of contacts of particle i in destination
-            tot_ctcs = declare('int')
-            tot_ctcs = d_total_tng_contacts[d_idx]
             p = d_idx * d_limit[0]
-            q = p + tot_ctcs
-
-            i = declare('int')
-            found_at = declare('int')
-            found = declare('int')
+            # ending index is q1 -1
+            q1 = p + tot_ctcs
 
             # check if the particle is in the tracking list
             # if so, then save the location at found_at
             found = 0
-            for i in range(p, q):
+            for i in range(p, q1):
                 if s_idx == d_tng_idx[i]:
                     if s_dem_id[s_idx] == d_tng_idx_dem_id[i]:
                         found_at = i
@@ -861,11 +869,17 @@ class RigidBodyCollisionStage2(Equation):
                 vt_y = vr_y - vn_y
                 vt_z = vr_z - vn_z
 
+                # compute the damping constants
+                m_eff = d_m[d_idx] * s_m[s_idx] / (d_m[d_idx] + s_m[s_idx])
+                log_en = log(self.en)
+                eta_n = -2. * log_en * sqrt(m_eff * self.kn) / sqrt(
+                    pi**2. + log_en**2.)
+
                 # normal force
                 kn_overlap = self.kn * overlap
-                fn_x = -kn_overlap * nxc - self.eta_n * vn_x
-                fn_y = -kn_overlap * nyc - self.eta_n * vn_y
-                fn_z = -kn_overlap * nzc - self.eta_n * vn_z
+                fn_x = -kn_overlap * nxc - eta_n * vn_x
+                fn_y = -kn_overlap * nyc - eta_n * vn_y
+                fn_z = -kn_overlap * nzc - eta_n * vn_z
 
                 # ------------- tangential force computation ----------------
                 # do not add new particles to the contact list at step
@@ -993,11 +1007,17 @@ class RigidBodyCollisionStage2(Equation):
                     d_vty[found_at] = vt_y
                     d_vtz[found_at] = vt_z
 
+                # compute the damping constants
+                m_eff_t = 2. / 7. * m_eff
+                log_et = log(self.et)
+                eta_t = -2. * log_en * sqrt(m_eff_t * self.kn) / sqrt(
+                    pi**2. + log_et**2.)
+
                 # find the tangential force from the tangential displacement
                 # and tangential velocity (eq 2.11 Thesis Ye)
-                ft0_x = -self.kt * d_tng_x[found_at] - self.eta_t * vt_x
-                ft0_y = -self.kt * d_tng_y[found_at] - self.eta_t * vt_y
-                ft0_z = -self.kt * d_tng_z[found_at] - self.eta_t * vt_z
+                ft0_x = -self.kt * d_tng_x[found_at] - eta_t * vt_x
+                ft0_y = -self.kt * d_tng_y[found_at] - eta_t * vt_y
+                ft0_z = -self.kt * d_tng_z[found_at] - eta_t * vt_z
 
                 # (*) check against Coulomb criterion
                 # Tangential force magnitude due to displacement
@@ -1019,11 +1039,11 @@ class RigidBodyCollisionStage2(Equation):
                         ty = ft0_y / ft0_magn
                         tz = ft0_z / ft0_magn
                         d_tng_x[found_at] = -self.kt_1 * (
-                            fn_mu * tx + self.eta_t * vt_x)
+                            fn_mu * tx + eta_t * vt_x)
                         d_tng_y[found_at] = -self.kt_1 * (
-                            fn_mu * ty + self.eta_t * vt_y)
+                            fn_mu * ty + eta_t * vt_y)
                         d_tng_z[found_at] = -self.kt_1 * (
-                            fn_mu * tz + self.eta_t * vt_z)
+                            fn_mu * tz + eta_t * vt_z)
 
                         # set the tangential force to static friction
                         # from Coulomb criterion
@@ -1040,7 +1060,8 @@ class UpdateTangentialContacts(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_z, d_rad_s,
                         d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x,
                         d_tng_y, d_tng_z, d_tng_nx, d_tng_ny, d_tng_nz,
-                        d_tng_idx_dem_id, s_x, s_y, s_z, s_rad_s, s_dem_id):
+                        d_vtx, d_vty, d_vtz, d_tng_idx_dem_id, s_x,
+                        s_y, s_z, s_rad_s, s_dem_id):
         p = declare('int')
         count = declare('int')
         k = declare('int')
@@ -1085,12 +1106,16 @@ class UpdateTangentialContacts(Equation):
                         # simply make it to null contact.
                         if k == last_idx_tmp:
                             d_tng_idx[k] = -1
+                            d_tng_idx_dem_id[k] = -1
                             d_tng_x[k] = 0.
                             d_tng_y[k] = 0.
                             d_tng_z[k] = 0.
                             d_tng_nx[k] = 0.
                             d_tng_ny[k] = 0.
                             d_tng_nz[k] = 0.
+                            d_vtx[k] = 0.
+                            d_vty[k] = 0.
+                            d_vtz[k] = 0.
                         else:
                             # swap the current tracking index with the final
                             # contact index
@@ -1120,6 +1145,22 @@ class UpdateTangentialContacts(Equation):
                             # swap tangential nz orientation
                             d_tng_nz[k] = d_tng_nz[last_idx_tmp]
                             d_tng_nz[last_idx_tmp] = 0.
+
+                            # swap tangential nx orientation
+                            d_vtx[k] = d_vtx[last_idx_tmp]
+                            d_vtx[last_idx_tmp] = 0.
+
+                            # swap tangential ny orientation
+                            d_vty[k] = d_vtx[last_idx_tmp]
+                            d_vty[last_idx_tmp] = 0.
+
+                            # swap tangential nz orientation
+                            d_vtz[k] = d_vtz[last_idx_tmp]
+                            d_vtz[last_idx_tmp] = 0.
+
+                            # swap tangential idx dem id
+                            d_tng_idx_dem_id[k] = d_tng_idx_dem_id[last_idx_tmp]
+                            d_tng_idx_dem_id[last_idx_tmp] = -1
 
                             # decrease the last_idx_tmp, since we swapped it to
                             # -1
@@ -1307,7 +1348,6 @@ class RigidBodyWallCollision(Equation):
             d_fx[d_idx] += fn_x + ft_x
             d_fy[d_idx] += fn_y + ft_y
             d_fz[d_idx] += fn_z + ft_z
-            # print(d_fz[d_idx])
         else:
             d_tang_velocity_x[d_idx] = 0
             d_tang_velocity_y[d_idx] = 0
