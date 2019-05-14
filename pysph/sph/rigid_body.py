@@ -689,6 +689,12 @@ class RigidBodyCollisionStage1(Equation):
                     d_tng_idx[found_at] = s_idx
                     d_total_tng_contacts[d_idx] += 1
                     d_tng_idx_dem_id[found_at] = s_dem_id[s_idx]
+                    d_tng_nx[found_at] = nxc
+                    d_tng_ny[found_at] = nyc
+                    d_tng_nz[found_at] = nzc
+                    d_tng_nx0[found_at] = nxc
+                    d_tng_ny0[found_at] = nyc
+                    d_tng_nz0[found_at] = nzc
 
                 # compute and set the tangential acceleration for the
                 # current time step

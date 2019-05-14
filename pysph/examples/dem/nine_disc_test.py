@@ -14,14 +14,14 @@ from pysph.base.kernels import CubicSpline
 
 from pysph.solver.solver import Solver
 from pysph.sph.integrator import EPECIntegrator
-from pysph.tools.sph_evaluator import SPHEvaluator
+from pysph.base.utils import (get_particle_array_rigid_body)
 
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
-from pysph.sph.rigid_body import (
-    BodyForce, RK2StepRigidBodyDEM, RigidBodyCollisionStage2,
+from pysph.sph.dem import (
+    BodyForce, RK2StepRigidBody, RigidBodyCollisionStage2,
     RigidBodyCollisionStage1, RigidBodyMoments, RigidBodyMotion,
-    get_particle_array_rigid_body_dem, UpdateTangentialContacts)
+    get_particle_array_dem)
 from pysph.tools.geometry import (get_2d_tank)
 
 
@@ -66,7 +66,7 @@ class ZhangStackOfCylinders(Application):
         self.wall_spacing = 1e-3
         self.wall_layers = 2
         # self.wall_time = 0.01
-        self.wall_time = 0.2
+        self.wall_time = 0.1
         self.wall_rho = 2000.
 
         # simulation properties
@@ -74,49 +74,30 @@ class ZhangStackOfCylinders(Application):
         self.alpha = 0.1
 
         # solver data
-        self.tf = 0.5 + self.wall_time
+        self.tf = 0.6 + self.wall_time
         self.dt = 5e-5
-        self.dim = 2
 
     def create_particles(self):
-        # get bodyid for each cylinder
-        xc, yc, body_id = self.create_cylinders_stack()
-        m = self.cylinder_rho * self.cylinder_spacing**2
-        h = self.hdx * self.cylinder_radius
-        rad_s = self.cylinder_spacing / 2.
-        V = self.cylinder_spacing**2
-        cylinders = get_particle_array_rigid_body_dem(
-            x=xc, y=yc, h=h, m=m, rho=self.cylinder_rho, rad_s=rad_s, V=V,
-            body_id=body_id, dem_id=body_id, name="cylinders")
+        # particle positions
+        xd = np.array([150., 250., 350., 150., 250., 350, 150., 250.,
+                       350.])
+        yd = np.array([150., 150., 150., 250., 250, 250., 350., 350.,
+                       350.])
+        rad_s = 50.
+        rho = 1000.
+        V = np.pi * rad_s**2.
+        m = rho * V
+        h = 1.2 * rad_s
+        discs = get_particle_array_rigid_body_dem(
+            x=xd, y=yd, h=h, m=m, rho=rho, rad_s=rad_s,
+            dem_id=0, name="discs")
 
-        xd, yd = self.create_dam()
-        dam = get_particle_array_rigid_body_dem(
-            x=xd, y=yd, h=h, m=m, rho=self.dam_rho,
-            rad_s=self.dam_spacing / 2., V=self.dam_spacing**2, name="dam",
-            dem_id=max(body_id) + 1)
-
-        xw, yw = self.create_wall()
-        wall = get_particle_array_rigid_body_dem(
-            x=xw, y=yw, h=h, m=m, rho=self.wall_rho,
-            rad_s=self.wall_spacing / 2., V=self.wall_spacing**2, name="wall",
-            dem_id=max(body_id) + 2)
-        wall.x += 0.0015
-
-        # please run this function to know how
-        # geometry looks like
-        # from matplotlib import pyplot as plt
-        # plt.scatter(cylinders.x, cylinders.y)
-        # plt.scatter(dam.x, dam.y)
-        # plt.scatter(wall.x, wall.y)
-        # plt.axes().set_aspect('equal', 'datalim')
-        # print("done")
-        # plt.show()
-        return [cylinders, dam, wall]
+        return [discs]
 
     def create_solver(self):
         kernel = CubicSpline(dim=2)
 
-        integrator = EPECIntegrator(cylinders=RK2StepRigidBodyDEM())
+        integrator = EPECIntegrator(cylinders=RK2StepRigidBody())
 
         dt = self.dt
         print("DT: %s" % dt)
@@ -135,7 +116,7 @@ class ZhangStackOfCylinders(Application):
             Group(equations=[
                 RigidBodyCollisionStage1(dest='cylinders', sources=[
                     'dam', 'wall', 'cylinders'
-                ], kn=1e7, en=0.5, mu=0.3),
+                ], kn=1e7, en=0.3, mu=0.3),
             ]),
             Group(
                 equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
@@ -150,13 +131,29 @@ class ZhangStackOfCylinders(Application):
             Group(equations=[
                 RigidBodyCollisionStage2(dest='cylinders', sources=[
                     'dam', 'wall', 'cylinders'
-                ], kn=1e7, en=0.5, mu=0.3),
+                ], kn=1e7, en=0.1, mu=0.3),
             ]),
             Group(
                 equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
             Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
         ]
         return MultiStageEquations([stage1, stage2])
+
+        # equations = [
+        #     Group(
+        #         equations=[
+        #             BodyForce(dest='cylinders', sources=None, gy=-9.81),
+        #         ], real=False),
+        #     Group(equations=[
+        #         RigidBodyCollisionNoHistory(dest='cylinders', sources=[
+        #             'dam', 'wall', 'cylinders'
+        #         ], kn=1e7, en=0.5),
+        #     ]),
+        #     Group(
+        #         equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
+        #     Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
+        # ]
+        # return equations
 
     def create_dam(self):
         xt, yt = get_2d_tank(self.dam_spacing,
@@ -166,8 +163,8 @@ class ZhangStackOfCylinders(Application):
         return xt, yt
 
     def create_wall(self):
-        x = np.arange(0.054 + 2. * self.wall_spacing,
-                      0.056 + 2 * self.wall_spacing, self.wall_spacing)
+        x = np.arange(0.063 + 2. * self.wall_spacing,
+                      0.067 + 2 * self.wall_spacing, self.wall_spacing)
         y = np.arange(0., self.wall_height, self.wall_spacing)
         xw, yw = np.meshgrid(x, y)
         return xw.ravel(), yw.ravel()
@@ -178,10 +175,9 @@ class ZhangStackOfCylinders(Application):
         y_six = np.array([])
         x_tmp1, y_tmp1 = create_circle(
             self.cylinder_diameter, self.cylinder_spacing,
-            [self.cylinder_radius, self.cylinder_radius+self.cylinder_spacing])
+            [self.cylinder_radius, self.cylinder_radius])
         for i in range(6):
-            x_tmp = x_tmp1 + i * (self.cylinder_diameter -
-                                  self.cylinder_spacing/2.)
+            x_tmp = x_tmp1 + i * self.cylinder_diameter
             x_six = np.concatenate((x_six, x_tmp))
             y_six = np.concatenate((y_six, y_tmp1))
 
@@ -198,14 +194,14 @@ class ZhangStackOfCylinders(Application):
         y_five = np.array([])
         x_tmp1, y_tmp1 = create_circle(
             self.cylinder_diameter, self.cylinder_spacing,
-            [2. * self.cylinder_radius, self.cylinder_radius+self.cylinder_spacing + self.cylinder_spacing/2.])
+            [2. * self.cylinder_radius, self.cylinder_radius])
 
         for i in range(5):
-            x_tmp = x_tmp1 + i * (self.cylinder_diameter - self.cylinder_spacing/2.)
+            x_tmp = x_tmp1 + i * self.cylinder_diameter
             x_five = np.concatenate((x_five, x_tmp))
             y_five = np.concatenate((y_five, y_tmp1))
 
-        y_five = y_five + 0.75 * self.cylinder_diameter
+        y_five = y_five + 0.8 * self.cylinder_diameter
         x_five = x_five
 
         # create three layers of five cylinder rows
@@ -246,13 +242,6 @@ class ZhangStackOfCylinders(Application):
         print("done")
         plt.show()
 
-    def _make_accel_eval(self, equations, pa_arrays):
-        kernel = CubicSpline(dim=self.dim)
-        seval = SPHEvaluator(
-            arrays=pa_arrays, equations=equations, dim=self.dim,
-            kernel=kernel)
-        return seval
-
     def post_step(self, solver):
         t = solver.t
         dt = solver.dt
@@ -261,18 +250,6 @@ class ZhangStackOfCylinders(Application):
             for pa in self.particles:
                 if pa.name == 'wall':
                     pa.y += 14 * 1e-2
-
-        # eqs1 = [
-        #     Group(equations=[
-        #         UpdateTangentialContacts(dest='cylinders',
-        #                                  sources=["cylinders", "wall", "dam"]),
-        #     ]),
-        # ]
-        # arrays = self.particles
-        # a_eval = self._make_accel_eval(eqs1, arrays)
-
-        # # When
-        # a_eval.evaluate(t, dt)
 
     def post_process(self):
         """This function will run once per time step after the time step is
@@ -316,16 +293,9 @@ class ZhangStackOfCylinders(Application):
         plt.legend()
         plt.show()
 
-    def customize_output(self):
-        self._mayavi_config('''
-        b = particle_arrays['cylinders']
-        b.plot.actor.property.point_size = 2.
-        ''')
-
 
 if __name__ == '__main__':
     app = ZhangStackOfCylinders()
-    # app.create_particles()
     # app.geometry()
     app.run()
     # app.post_process()
