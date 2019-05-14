@@ -23,11 +23,11 @@ from pysph.dem.dem_nonlinear import (
     TsuijiNonLinearParticleParticleForceStage2)
 
 
-class Test1Limestone(Application):
+class Test1(Application):
     def initialize(self):
         self.radius = 0.010
         self.diameter = 2. * self.radius
-        self.tf = 0.00005
+        self.tf = 0.00007
         self.dt = 1e-6
         self.dim = 3
 
@@ -190,15 +190,17 @@ class Test1Limestone(Application):
     def customize_output(self):
         self._mayavi_config('''
         b = particle_arrays['spheres_glass']
-        b.plot.glyph.glyph_source.glyph_source = b.glyph.glyph_source.glyph_dict['sphere_source']
+        b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = 0.010
+        b.scalar = 'fx'
         b = particle_arrays['spheres_limestone']
-        b.plot.glyph.glyph_source.glyph_source = b.glyph.glyph_source.glyph_dict['sphere_source']
+        b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = 0.010
+        b.scalar = 'fx'
         ''')
 
 
 if __name__ == '__main__':
-    app = Test1Limestone()
-    # app.run()
+    app = Test1()
+    app.run()
     app.post_process()
