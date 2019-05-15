@@ -1,5 +1,5 @@
 """
-This example is a benchmark DEM numerical method.
+This example is a benchmark of DEM numerical method.
 This is a test two, where one spheres will have an elastic normal
 impact with a wall.
 

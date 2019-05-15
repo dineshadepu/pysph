@@ -85,7 +85,6 @@ class TsuijiNonLinearParticleParticleForceStage1(Equation):
 
 
         Keyword arguments:
-        kn -- Normal spring stiffness (default 1e3)
         mu -- friction coefficient (default 0.5)
         en -- coefficient of restitution (0.8)
 
@@ -209,7 +208,6 @@ class TsuijiNonLinearParticleParticleForceStage2(Equation):
 
 
         Keyword arguments:
-        kn -- Normal spring stiffness (default 1e3)
         mu -- friction coefficient (default 0.5)
         en -- coefficient of restitution (0.8)
 
@@ -323,18 +321,23 @@ class TsuijiNonLinearParticleWallForceStage1(Equation):
     """Force between two spheres is implemented using Nonlinear DEM contact force
     law.
 
-    The force is modelled from reference [1].
+    The force is modelled from reference [1], [2]. Damping force is taken from
+    [2], mainly for constants of damping.
 
     [1] Lagrangian numerical simulation of plug flow of cohesion less particles
     in a horizontal pipe Ye.
+
+    [2] On the Determination of the Damping Coefficient of Non-linear
+    Spring-dashpot System to Model Hertz Contact for Simulation by Discrete
+    Element Method
+
     """
 
-    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+    def __init__(self, dest, sources, mu=0.5, en=0.8):
         """the required coefficients for force calculation.
 
 
         Keyword arguments:
-        kn -- Normal spring stiffness (default 1e3)
         mu -- friction coefficient (default 0.5)
         en -- coefficient of restitution (0.8)
 
@@ -343,6 +346,9 @@ class TsuijiNonLinearParticleWallForceStage1(Equation):
 
         """
         self.en = en
+        # a constant for used for damping
+        log_en = log(self.en)
+        self.alpha_1 = -log_en * sqrt(5. / (log_en**2. + pi**2.))
         self.et = 0.5 * self.en
         self.mu = mu
         super(TsuijiNonLinearParticleWallForceStage1, self).__init__(
@@ -425,18 +431,25 @@ class TsuijiNonLinearParticleWallForceStage1(Equation):
 
                 E_eff = Ed / (1. - pd**2.)
                 G_eff = Gd / (2. - pd)
+                # E_eff = Ed
+                # G_eff = Gd
+                # tsuiji paper gave
+                # E_eff = Ed * Es / (Ed * (1. - ps**2.) + Es * (1. - pd**2.))
                 r_eff = rd
 
                 kn = 4. / 3. * E_eff * sqrt(r_eff)
                 kt = 16. / 3. * G_eff * sqrt(r_eff)
                 kt_1 = 1. / kt
 
+                # damping force is taken from
+                # "On the Determination of the Damping Coefficient
+                # of Non-linear Spring-dashpot System to Model
+                # Hertz Contact for Simulation by Discrete Element
+                # Method" paper.
                 # compute the damping constants
+                #
                 m_eff = d_m[d_idx]
-                log_en = log(self.en)
-                eta_n = -2. * log_en * sqrt(
-                    m_eff * kn) / sqrt(pi**2. + log_en**2.)
-                eta_n = 0.
+                eta_n = self.alpha_1 * sqrt(m_eff * kn) * overlap**0.25
 
                 # normal force
                 kn_overlap = kn * overlap**(1.5)
@@ -453,18 +466,23 @@ class TsuijiNonLinearParticleWallForceStage2(Equation):
     """Force between two spheres is implemented using Nonlinear DEM contact force
     law.
 
-    The force is modelled from reference [1].
+    The force is modelled from reference [1], [2]. Damping force is taken from
+    [2], mainly for constants of damping.
 
     [1] Lagrangian numerical simulation of plug flow of cohesion less particles
     in a horizontal pipe Ye.
+
+    [2] On the Determination of the Damping Coefficient of Non-linear
+    Spring-dashpot System to Model Hertz Contact for Simulation by Discrete
+    Element Method
+
     """
 
-    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+    def __init__(self, dest, sources, mu=0.5, en=0.8):
         """the required coefficients for force calculation.
 
 
         Keyword arguments:
-        kn -- Normal spring stiffness (default 1e3)
         mu -- friction coefficient (default 0.5)
         en -- coefficient of restitution (0.8)
 
@@ -473,6 +491,9 @@ class TsuijiNonLinearParticleWallForceStage2(Equation):
 
         """
         self.en = en
+        # a constant for used for damping
+        log_en = log(self.en)
+        self.alpha_1 = -log_en * sqrt(5. / (log_en**2. + pi**2.))
         self.et = 0.5 * self.en
         self.mu = mu
         super(TsuijiNonLinearParticleWallForceStage2, self).__init__(
@@ -495,7 +516,6 @@ class TsuijiNonLinearParticleWallForceStage2(Equation):
             xij[0] = d_x[d_idx] - s_x[i]
             xij[1] = d_y[d_idx] - s_y[i]
             xij[2] = d_z[d_idx] - s_z[i]
-            rij = sqrt(xij[0] * xij[0] + xij[1] * xij[1] + xij[2] * xij[2])
             overlap = d_rad_s[d_idx] - (
                 xij[0] * s_nx[i] + xij[1] * s_ny[i] + xij[2] * s_nz[i])
 
@@ -556,18 +576,25 @@ class TsuijiNonLinearParticleWallForceStage2(Equation):
 
                 E_eff = Ed / (1. - pd**2.)
                 G_eff = Gd / (2. - pd)
+                # E_eff = Ed
+                # G_eff = Gd
+                # tsuiji paper gave
+                # E_eff = Ed * Es / (Ed * (1. - ps**2.) + Es * (1. - pd**2.))
                 r_eff = rd
 
                 kn = 4. / 3. * E_eff * sqrt(r_eff)
                 kt = 16. / 3. * G_eff * sqrt(r_eff)
                 kt_1 = 1. / kt
 
+                # damping force is taken from
+                # "On the Determination of the Damping Coefficient
+                # of Non-linear Spring-dashpot System to Model
+                # Hertz Contact for Simulation by Discrete Element
+                # Method" paper.
                 # compute the damping constants
+                #
                 m_eff = d_m[d_idx]
-                log_en = log(self.en)
-                eta_n = -2. * log_en * sqrt(
-                    m_eff * kn) / sqrt(pi**2. + log_en**2.)
-                eta_n = 0.
+                eta_n = self.alpha_1 * sqrt(m_eff * kn) * overlap**0.25
 
                 # normal force
                 kn_overlap = kn * overlap**(1.5)
