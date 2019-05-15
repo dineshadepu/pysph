@@ -21,7 +21,8 @@ def get_particle_array_dem(constants=None, **props):
 
     dem_id = props.pop('dem_id', None)
 
-    pa = get_particle_array(additional_props=dem_props, **props)
+    pa = get_particle_array(additional_props=dem_props, constants=constants,
+                            **props)
 
     pa.add_property('dem_id', type='int', data=dem_id)
     # create the array to save the tangential interaction particles
@@ -60,8 +61,7 @@ def get_particle_array_dem(constants=None, **props):
 
 
 class ResetForces(Equation):
-    def initialize(self, d_idx, d_fx, d_fy, d_fz,
-                   d_torx, d_tory, d_torz):
+    def initialize(self, d_idx, d_fx, d_fy, d_fz, d_torx, d_tory, d_torz):
         d_fx[d_idx] = 0.
         d_fy[d_idx] = 0.
         d_fz[d_idx] = 0.
@@ -169,8 +169,7 @@ class TsuijiNonLinearParticleParticleForceStage1(Equation):
             rd = d_rad_s[d_idx]
             rs = s_rad_s[s_idx]
 
-            E_eff = (Ed * Es) / (Ed * (1. - ps**2.) + Es *
-                                 (1. - pd**2.))
+            E_eff = (Ed * Es) / (Ed * (1. - ps**2.) + Es * (1. - pd**2.))
             G_eff = (Gd * Gs) / (Gd * (2. - ps) + Gs * (2. - pd))
             r_eff = (rd * rs) / (rd + rs)
 
@@ -181,8 +180,7 @@ class TsuijiNonLinearParticleParticleForceStage1(Equation):
             # compute the damping constants
             m_eff = d_m[d_idx] * s_m[s_idx] / (d_m[d_idx] + s_m[s_idx])
             log_en = log(self.en)
-            eta_n = -2. * log_en * sqrt(
-                m_eff * kn) / sqrt(pi**2. + log_en**2.)
+            eta_n = -2. * log_en * sqrt(m_eff * kn) / sqrt(pi**2. + log_en**2.)
             eta_n = 0.
 
             # normal force
@@ -307,8 +305,7 @@ class TsuijiNonLinearParticleParticleForceStage2(Equation):
             # compute the damping constants
             m_eff = d_m[d_idx] * s_m[s_idx] / (d_m[d_idx] + s_m[s_idx])
             log_en = log(self.en)
-            eta_n = -2. * log_en * sqrt(
-                m_eff * kn) / sqrt(pi**2. + log_en**2.)
+            eta_n = -2. * log_en * sqrt(m_eff * kn) / sqrt(pi**2. + log_en**2.)
             eta_n = 0.
 
             # normal force
@@ -320,6 +317,267 @@ class TsuijiNonLinearParticleParticleForceStage2(Equation):
             d_fx[d_idx] += fn_x
             d_fy[d_idx] += fn_y
             d_fz[d_idx] += fn_z
+
+
+class TsuijiNonLinearParticleWallForceStage1(Equation):
+    """Force between two spheres is implemented using Nonlinear DEM contact force
+    law.
+
+    The force is modelled from reference [1].
+
+    [1] Lagrangian numerical simulation of plug flow of cohesion less particles
+    in a horizontal pipe Ye.
+    """
+
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        """the required coefficients for force calculation.
+
+
+        Keyword arguments:
+        kn -- Normal spring stiffness (default 1e3)
+        mu -- friction coefficient (default 0.5)
+        en -- coefficient of restitution (0.8)
+
+        Given these coefficients, tangential spring stiffness, normal and
+        tangential damping coefficient are calculated by default.
+
+        """
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        super(TsuijiNonLinearParticleWallForceStage1, self).__init__(
+            dest, sources)
+
+    def initialize_pair(
+            self, d_idx, d_m, d_u, d_v, d_w, d_x, d_y, d_z, d_fx, d_fy, d_fz,
+            d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0, d_tng_z0, d_tng_idx,
+            d_tng_idx_dem_id, d_total_tng_contacts, d_dem_id, d_limit, d_vtx,
+            d_vty, d_vtz, d_tng_nx, d_tng_ny, d_tng_nz, d_tng_nx0, d_tng_ny0,
+            d_tng_nz0, d_wx, d_wy, d_wz, d_yng_m, d_poissons_ratio, d_shear_m,
+            d_torx, d_tory, d_torz, d_rad_s, s_idx, s_x, s_y, s_z, s_nx, s_ny,
+            s_nz, s_poissons_ratio, s_yng_m, s_shear_m, s_np):
+        i = declare('int')
+        xij = declare('matrix(3)')
+        vij = declare('matrix(3)')
+        # check overlap amount
+        for i in range(s_np[0]):
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            xij[2] = d_z[d_idx] - s_z[i]
+            overlap = d_rad_s[d_idx] - (
+                xij[0] * s_nx[i] + xij[1] * s_ny[i] + xij[2] * s_nz[i])
+
+            if overlap > 0:
+                # basic variables: normal vector
+                nxc = -s_nx[i]
+                nyc = -s_ny[i]
+                nzc = -s_nz[i]
+
+                # ---- Relative velocity computation (Eq 2.9) ----
+                # relative velocity of particle d_idx w.r.t particle s_idx at
+                # contact point. The velocity difference provided by PySPH is
+                # only between translational velocities, but we need to
+                # consider rotational velocities also.
+                # Distance till contact point
+                a_i = d_rad_s[d_idx] - overlap
+                # TODO: This has to be replaced by a custom cross product
+                # function
+                # wij = a_i * w_i + a_j * w_j
+                # since w_j is wall, and angular velocity is zero
+                # wij = a_i * w_i
+                wijx = a_i * d_wx[d_idx]
+                wijy = a_i * d_wy[d_idx]
+                wijz = a_i * d_wz[d_idx]
+                # wij \cross nij
+                wcn_x = wijy * nzc - wijz * nyc
+                wcn_y = wijz * nxc - wijx * nzc
+                wcn_z = wijx * nyc - wijy * nxc
+
+                vij[0] = d_u[d_idx]
+                vij[1] = d_v[d_idx]
+                vij[2] = d_w[d_idx]
+                vr_x = vij[0] + wcn_x
+                vr_y = vij[1] + wcn_y
+                vr_z = vij[2] + wcn_z
+
+                # normal velocity magnitude
+                vr_dot_nij = vr_x * nxc + vr_y * nyc + vr_z * nzc
+                vn_x = vr_dot_nij * nxc
+                vn_y = vr_dot_nij * nyc
+                vn_z = vr_dot_nij * nzc
+
+                # tangential velocity
+                vt_x = vr_x - vn_x
+                vt_y = vr_y - vn_y
+                vt_z = vr_z - vn_z
+                # magnitude of the tangential velocity
+                # vt_magn = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z)**0.5
+
+                # compute the spring stiffness (nonlinear model)
+                Ed = d_yng_m[d_idx]
+                Es = s_yng_m[i]
+                Gd = d_shear_m[d_idx]
+                Gs = s_shear_m[i]
+                pd = d_poissons_ratio[d_idx]
+                ps = s_poissons_ratio[i]
+                rd = d_rad_s[d_idx]
+
+                E_eff = Ed / (1. - pd**2.)
+                G_eff = Gd / (2. - pd)
+                r_eff = rd
+
+                kn = 4. / 3. * E_eff * sqrt(r_eff)
+                kt = 16. / 3. * G_eff * sqrt(r_eff)
+                kt_1 = 1. / kt
+
+                # compute the damping constants
+                m_eff = d_m[d_idx]
+                log_en = log(self.en)
+                eta_n = -2. * log_en * sqrt(
+                    m_eff * kn) / sqrt(pi**2. + log_en**2.)
+                eta_n = 0.
+
+                # normal force
+                kn_overlap = kn * overlap**(1.5)
+                fn_x = -kn_overlap * nxc - eta_n * vn_x
+                fn_y = -kn_overlap * nyc - eta_n * vn_y
+                fn_z = -kn_overlap * nzc - eta_n * vn_z
+
+                d_fx[d_idx] += fn_x
+                d_fy[d_idx] += fn_y
+                d_fz[d_idx] += fn_z
+
+
+class TsuijiNonLinearParticleWallForceStage2(Equation):
+    """Force between two spheres is implemented using Nonlinear DEM contact force
+    law.
+
+    The force is modelled from reference [1].
+
+    [1] Lagrangian numerical simulation of plug flow of cohesion less particles
+    in a horizontal pipe Ye.
+    """
+
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        """the required coefficients for force calculation.
+
+
+        Keyword arguments:
+        kn -- Normal spring stiffness (default 1e3)
+        mu -- friction coefficient (default 0.5)
+        en -- coefficient of restitution (0.8)
+
+        Given these coefficients, tangential spring stiffness, normal and
+        tangential damping coefficient are calculated by default.
+
+        """
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        super(TsuijiNonLinearParticleWallForceStage2, self).__init__(
+            dest, sources)
+
+    def initialize_pair(
+            self, d_idx, d_m, d_u, d_v, d_w, d_x, d_y, d_z, d_fx, d_fy, d_fz,
+            d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0, d_tng_z0, d_tng_idx,
+            d_tng_idx_dem_id, d_total_tng_contacts, d_dem_id, d_limit, d_vtx,
+            d_vty, d_vtz, d_tng_nx, d_tng_ny, d_tng_nz, d_tng_nx0, d_tng_ny0,
+            d_tng_nz0, d_wx, d_wy, d_wz, d_yng_m, d_poissons_ratio, d_shear_m,
+            d_torx, d_tory, d_torz, d_rad_s, s_idx, s_x, s_y, s_z, s_nx, s_ny,
+            s_nz, s_poissons_ratio, s_yng_m, s_shear_m, s_np):
+        i = declare('int')
+        xij = declare('matrix(3)')
+        vij = declare('matrix(3)')
+        # check overlap amount
+        for i in range(s_np[0]):
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            xij[2] = d_z[d_idx] - s_z[i]
+            rij = sqrt(xij[0] * xij[0] + xij[1] * xij[1] + xij[2] * xij[2])
+            overlap = d_rad_s[d_idx] - (
+                xij[0] * s_nx[i] + xij[1] * s_ny[i] + xij[2] * s_nz[i])
+
+            if overlap > 0:
+                # basic variables: normal vector
+                nxc = -s_nx[i]
+                nyc = -s_ny[i]
+                nzc = -s_nz[i]
+
+                # ---- Relative velocity computation (Eq 2.9) ----
+                # relative velocity of particle d_idx w.r.t particle s_idx at
+                # contact point. The velocity difference provided by PySPH is
+                # only between translational velocities, but we need to
+                # consider rotational velocities also.
+                # Distance till contact point
+                a_i = d_rad_s[d_idx] - overlap
+                # TODO: This has to be replaced by a custom cross product
+                # function
+                # wij = a_i * w_i + a_j * w_j
+                # since w_j is wall, and angular velocity is zero
+                # wij = a_i * w_i
+                wijx = a_i * d_wx[d_idx]
+                wijy = a_i * d_wy[d_idx]
+                wijz = a_i * d_wz[d_idx]
+                # wij \cross nij
+                wcn_x = wijy * nzc - wijz * nyc
+                wcn_y = wijz * nxc - wijx * nzc
+                wcn_z = wijx * nyc - wijy * nxc
+
+                vij[0] = d_u[d_idx]
+                vij[1] = d_v[d_idx]
+                vij[2] = d_w[d_idx]
+                vr_x = vij[0] + wcn_x
+                vr_y = vij[1] + wcn_y
+                vr_z = vij[2] + wcn_z
+
+                # normal velocity magnitude
+                vr_dot_nij = vr_x * nxc + vr_y * nyc + vr_z * nzc
+                vn_x = vr_dot_nij * nxc
+                vn_y = vr_dot_nij * nyc
+                vn_z = vr_dot_nij * nzc
+
+                # tangential velocity
+                vt_x = vr_x - vn_x
+                vt_y = vr_y - vn_y
+                vt_z = vr_z - vn_z
+                # magnitude of the tangential velocity
+                # vt_magn = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z)**0.5
+
+                # compute the spring stiffness (nonlinear model)
+                Ed = d_yng_m[d_idx]
+                Es = s_yng_m[i]
+                Gd = d_shear_m[d_idx]
+                Gs = s_shear_m[i]
+                pd = d_poissons_ratio[d_idx]
+                ps = s_poissons_ratio[i]
+                rd = d_rad_s[d_idx]
+
+                E_eff = Ed / (1. - pd**2.)
+                G_eff = Gd / (2. - pd)
+                r_eff = rd
+
+                kn = 4. / 3. * E_eff * sqrt(r_eff)
+                kt = 16. / 3. * G_eff * sqrt(r_eff)
+                kt_1 = 1. / kt
+
+                # compute the damping constants
+                m_eff = d_m[d_idx]
+                log_en = log(self.en)
+                eta_n = -2. * log_en * sqrt(
+                    m_eff * kn) / sqrt(pi**2. + log_en**2.)
+                eta_n = 0.
+
+                # normal force
+                kn_overlap = kn * overlap**(1.5)
+                fn_x = -kn_overlap * nxc - eta_n * vn_x
+                fn_y = -kn_overlap * nyc - eta_n * vn_y
+                fn_z = -kn_overlap * nzc - eta_n * vn_z
+
+                d_fx[d_idx] += fn_x
+                d_fy[d_idx] += fn_y
+                d_fz[d_idx] += fn_z
 
 
 class RK2StepNonLinearDEM(IntegratorStep):
@@ -345,9 +603,8 @@ class RK2StepNonLinearDEM(IntegratorStep):
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_fx, d_fy, d_fz,
                d_x0, d_y0, d_z0, d_u0, d_v0, d_w0, d_wx0, d_wy0, d_wz0, d_torx,
                d_tory, d_torz, d_wx, d_wy, d_wz, d_m_inv, d_I_inv,
-               d_total_tng_contacts, d_limit, d_tng_x,
-               d_tng_y, d_tng_z, d_tng_x0, d_tng_y0, d_tng_z0, d_vtx, d_vty,
-               d_vtz, dt):
+               d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
+               d_tng_x0, d_tng_y0, d_tng_z0, d_vtx, d_vty, d_vtz, dt):
         dtb2 = dt / 2.
 
         d_x[d_idx] = d_x0[d_idx] + dtb2 * d_u[d_idx]
@@ -365,9 +622,8 @@ class RK2StepNonLinearDEM(IntegratorStep):
     def stage2(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_fx, d_fy, d_fz,
                d_x0, d_y0, d_z0, d_u0, d_v0, d_w0, d_wx0, d_wy0, d_wz0, d_torx,
                d_tory, d_torz, d_wx, d_wy, d_wz, d_m_inv, d_I_inv,
-               d_total_tng_contacts, d_limit, d_tng_x,
-               d_tng_y, d_tng_z, d_tng_x0, d_tng_y0, d_tng_z0, d_vtx, d_vty,
-               d_vtz, dt):
+               d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
+               d_tng_x0, d_tng_y0, d_tng_z0, d_vtx, d_vty, d_vtz, dt):
         d_x[d_idx] = d_x0[d_idx] + dt * d_u[d_idx]
         d_y[d_idx] = d_y0[d_idx] + dt * d_v[d_idx]
         d_z[d_idx] = d_z0[d_idx] + dt * d_w[d_idx]

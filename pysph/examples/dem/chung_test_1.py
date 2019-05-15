@@ -1,5 +1,5 @@
 """
-This example is a benchmark one of the benchmarks of DEM numerical method.
+This example is a benchmark of DEM numerical method.
 This is a first test, where two identical spheres will have an elastic normal
 impact.
 
@@ -97,11 +97,11 @@ class Test1(Application):
                 ResetForces(dest='spheres_glass', sources=None),
                 ResetForces(dest='spheres_limestone', sources=None),
                 TsuijiNonLinearParticleParticleForceStage1(
-                    dest='spheres_glass', sources=["spheres_glass"], en=0.1,
-                    mu=0.3),
+                    dest='spheres_glass', sources=["spheres_glass"], en=1,
+                    mu=0.35),
                 TsuijiNonLinearParticleParticleForceStage1(
                     dest='spheres_limestone', sources=["spheres_limestone"],
-                    en=0.1, mu=0.3)
+                    en=1, mu=0.35)
             ]),
         ]
 
@@ -110,11 +110,11 @@ class Test1(Application):
                 ResetForces(dest='spheres_glass', sources=None),
                 ResetForces(dest='spheres_limestone', sources=None),
                 TsuijiNonLinearParticleParticleForceStage2(
-                    dest='spheres_glass', sources=["spheres_glass"], en=0.1,
-                    mu=0.3),
+                    dest='spheres_glass', sources=["spheres_glass"], en=1,
+                    mu=0.35),
                 TsuijiNonLinearParticleParticleForceStage2(
                     dest='spheres_limestone', sources=["spheres_limestone"],
-                    en=0.1, mu=0.3)
+                    en=1, mu=0.35)
             ]),
         ]
         return MultiStageEquations([stage1, stage2])
