@@ -1107,12 +1107,47 @@ class RK2StepNonLinearDEM(IntegratorStep):
         d_wy0[d_idx] = d_wy[d_idx]
         d_wz0[d_idx] = d_wz[d_idx]
 
+        # -----------------------------------------------
+        # save the initial tangential contact information
+        # -----------------------------------------------
+        i = declare('int')
+        p = declare('int')
+        q = declare('int')
+        tot_ctcs = declare('int')
+        tot_ctcs = d_total_tng_contacts[d_idx]
+        p = d_idx * d_limit[0]
+        q = p + tot_ctcs
+
+        for i in range(p, q):
+            d_tng_x0[i] = d_tng_x[i]
+            d_tng_y0[i] = d_tng_y[i]
+            d_tng_z0[i] = d_tng_z[i]
+            d_tng_nx0[i] = d_tng_nx[i]
+            d_tng_ny0[i] = d_tng_ny[i]
+            d_tng_nz0[i] = d_tng_nz[i]
+
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_fx, d_fy, d_fz,
                d_x0, d_y0, d_z0, d_u0, d_v0, d_w0, d_wx0, d_wy0, d_wz0, d_torx,
                d_tory, d_torz, d_wx, d_wy, d_wz, d_m_inv, d_I_inv,
                d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
                d_tng_x0, d_tng_y0, d_tng_z0, d_vtx, d_vty, d_vtz, dt):
         dtb2 = dt / 2.
+
+        # --------------------------------------
+        # increment the tangential displacement
+        # --------------------------------------
+        i = declare('int')
+        p = declare('int')
+        q = declare('int')
+        tot_ctcs = declare('int')
+        tot_ctcs = d_total_tng_contacts[d_idx]
+        p = d_idx * d_limit[0]
+        q = p + tot_ctcs
+
+        for i in range(p, q):
+            d_tng_x[i] += d_vtx[i] * dtb2
+            d_tng_y[i] += d_vty[i] * dtb2
+            d_tng_z[i] += d_vtz[i] * dtb2
 
         d_x[d_idx] = d_x0[d_idx] + dtb2 * d_u[d_idx]
         d_y[d_idx] = d_y0[d_idx] + dtb2 * d_v[d_idx]
@@ -1131,6 +1166,22 @@ class RK2StepNonLinearDEM(IntegratorStep):
                d_tory, d_torz, d_wx, d_wy, d_wz, d_m_inv, d_I_inv,
                d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
                d_tng_x0, d_tng_y0, d_tng_z0, d_vtx, d_vty, d_vtz, dt):
+        # --------------------------------------
+        # increment the tangential displacement
+        # --------------------------------------
+        i = declare('int')
+        p = declare('int')
+        q = declare('int')
+        tot_ctcs = declare('int')
+        tot_ctcs = d_total_tng_contacts[d_idx]
+        p = d_idx * d_limit[0]
+        q = p + tot_ctcs
+
+        for i in range(p, q):
+            d_tng_x[i] = d_tng_x0[i] + d_vtx[i] * dt
+            d_tng_y[i] = d_tng_y0[i] + d_vty[i] * dt
+            d_tng_z[i] = d_tng_z0[i] + d_vtz[i] * dt
+
         d_x[d_idx] = d_x0[d_idx] + dt * d_u[d_idx]
         d_y[d_idx] = d_y0[d_idx] + dt * d_v[d_idx]
         d_z[d_idx] = d_z0[d_idx] + dt * d_w[d_idx]
