@@ -291,9 +291,9 @@ class TsuijiNonLinearParticleParticleForceStage2(Equation):
             rd = d_rad_s[d_idx]
             rs = s_rad_s[s_idx]
 
-            E_eff = 4. / 3. * (Ed * Es) / (Ed * (1. - ps**2.) + Es *
-                                           (1. - pd**2.))
-            G_eff = 16. / 3. * (Gd * Gs) / (Gd * (2. - ps) + Gs * (2. - pd))
+            E_eff = (Ed * Es) / (Ed * (1. - ps**2.) + Es *
+                                 (1. - pd**2.))
+            G_eff = (Gd * Gs) / (Gd * (2. - ps) + Gs * (2. - pd))
             r_eff = (rd * rs) / (rd + rs)
 
             kn = 4. / 3. * E_eff * sqrt(r_eff)
