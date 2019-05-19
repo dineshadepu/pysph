@@ -16,9 +16,8 @@ from pysph.sph.integrator import EPECIntegrator
 
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
-from pysph.dem.dem_nonlinear import (
-    get_particle_array_dem, RK2StepNonLinearDEM,
-    ResetForces,
+from pysph.dem.discontinuous_dem.dem_nonlinear import (
+    get_particle_array_dem, RK2StepNonLinearDEM, ResetForces,
     TsuijiNonLinearParticleParticleForceStage1,
     TsuijiNonLinearParticleParticleForceStage2)
 
@@ -81,13 +80,10 @@ class Test1(Application):
 
         dt = self.dt
         tf = self.tf
-        if dt < 1e-5:
-            pfreq = 1000
-        else:
-            pfreq = 100
+        pfreq = 1
 
-        solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator, dt=dt,
-                        tf=tf, pfreq=pfreq)
+        solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
+                        dt=dt, tf=tf, pfreq=pfreq)
 
         return solver
 
@@ -165,9 +161,8 @@ class Test1(Application):
     def _make_accel_eval(self, equations, pa_arrays):
         from pysph.tools.sph_evaluator import SPHEvaluator
         kernel = CubicSpline(dim=self.dim)
-        seval = SPHEvaluator(
-            arrays=pa_arrays, equations=equations, dim=self.dim,
-            kernel=kernel)
+        seval = SPHEvaluator(arrays=pa_arrays, equations=equations,
+                             dim=self.dim, kernel=kernel)
         return seval
 
     def post_step(self, solver):
@@ -203,4 +198,4 @@ class Test1(Application):
 if __name__ == '__main__':
     app = Test1()
     app.run()
-    app.post_process()
+    # app.post_process()

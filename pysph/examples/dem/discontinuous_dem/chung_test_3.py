@@ -16,10 +16,10 @@ from pysph.sph.integrator import EPECIntegrator
 
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
-from pysph.dem.dem_nonlinear import (get_particle_array_dem,
-                                     RK2StepNonLinearDEM, ResetForces,
-                                     TsuijiNonLinearParticleWallForceStage1,
-                                     TsuijiNonLinearParticleWallForceStage2)
+from pysph.dem.discontinuous_dem.dem_nonlinear import (
+    get_particle_array_dem, RK2StepNonLinearDEM, ResetForces,
+    TsuijiNonLinearParticleWallForceStage1,
+    TsuijiNonLinearParticleWallForceStage2)
 
 
 class Test3(Application):

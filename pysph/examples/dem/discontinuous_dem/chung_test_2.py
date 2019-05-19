@@ -4,6 +4,8 @@ This is a test two, where one spheres will have an elastic normal
 impact with a wall.
 
 Link: https://link.springer.com/article/10.1007/s10035-011-0277-0
+
+Time: 30 seconds
 """
 from __future__ import print_function
 import numpy as np
@@ -16,10 +18,10 @@ from pysph.sph.integrator import EPECIntegrator
 
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
-from pysph.dem.dem_nonlinear import (get_particle_array_dem,
-                                     RK2StepNonLinearDEM, ResetForces,
-                                     TsuijiNonLinearParticleWallForceStage1,
-                                     TsuijiNonLinearParticleWallForceStage2)
+from pysph.dem.discontinuous_dem.dem_nonlinear import (
+    get_particle_array_dem, RK2StepNonLinearDEM, ResetForces,
+    TsuijiNonLinearParticleWallForceStage1,
+    TsuijiNonLinearParticleWallForceStage2)
 
 
 class Test2(Application):
@@ -107,10 +109,7 @@ class Test2(Application):
 
         dt = self.dt
         tf = self.tf
-        if dt < 1e-5:
-            pfreq = 1000
-        else:
-            pfreq = 100
+        pfreq = 10
 
         solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
                         dt=dt, tf=tf, pfreq=pfreq)
@@ -222,4 +221,4 @@ class Test2(Application):
 if __name__ == '__main__':
     app = Test2()
     app.run()
-    app.post_process()
+    # app.post_process()
