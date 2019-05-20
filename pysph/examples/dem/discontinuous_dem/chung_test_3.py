@@ -23,9 +23,9 @@ from pysph.dem.discontinuous_dem.dem_nonlinear import (
 
 
 class Test3(Application):
-    def __init__(self, fname, en=1.0):
+    def __init__(self, en=1.0):
         self.en = en
-        super(Test3, self).__init__(fname)
+        super(Test3, self).__init__()
 
     def initialize(self):
         self.radius = 0.0025
@@ -180,8 +180,12 @@ class Test3(Application):
 if __name__ == '__main__':
     en = [0.2, 0.4, 0.6, 0.8, 1.0]
     for i in en:
-        app = Test3(fname="chung_test_3_" + str(i), en=i)
-        app.run()
+        app = Test3(en=i)
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        app.run(['--disable-output', '-d', tmpdir])
+        import shutil
+        shutil.rmtree(tmpdir)
         particles = app.particles[1]
         print("en is " + str(i))
         print(particles.u[0] / -3.9)

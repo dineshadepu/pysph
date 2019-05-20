@@ -238,7 +238,7 @@ class Test4(Application):
         plt.ylim([-800., 0.])
         # plt.show()
         import os
-        fig = os.path.join(self.output_dir, "incident_angle_vs_ang_vel.png")
+        fig = os.path.join("test_4_incident_angle_vs_ang_vel.png")
         plt.savefig(fig, dpi=300)
         #####################################
         # angular velocity comparison  ends #
@@ -285,8 +285,7 @@ class Test4(Application):
         plt.xlim([0., 90.])
         plt.ylim([0.4, 1.0])
         # plt.show()
-        fig = os.path.join(self.output_dir,
-                           "incident_angle_vs_tangential_coeff.png")
+        fig = os.path.join("test_4_incident_angle_vs_tangential_coeff.png")
         plt.savefig(fig, dpi=300)
         ###########################################
         # tangential restitution coefficient ends #
@@ -332,10 +331,9 @@ class Test4(Application):
         plt.ylabel('Rebound angle')
         plt.xlim([0., 90.])
         plt.ylim([-10, 90])
-        fig = os.path.join(self.output_dir,
-                           "incident_angle_vs_rebound_angle.png")
+        fig = os.path.join("test_4_incident_angle_vs_rebound_angle.png")
         plt.savefig(fig, dpi=300)
-        plt.show()
+        # plt.show()
 
         ######################
         # rebound angle ends #
@@ -366,7 +364,12 @@ if __name__ == '__main__':
     rebound_angle_al_alloy = []
     for i in incident_angle:
         app = Test4(fname="chung_test_4_" + str(i), theta=i)
-        app.run()
+        import tempfile
+        tmpdir = tempfile.mkdtemp()
+        app.run(['--disable-output', '-d', tmpdir])
+        import shutil
+        shutil.rmtree(tmpdir)
+
         particles = app.particles
         ang_vel_al_oxide.append(particles[0].wz[0])
         tng_rst_coeff_al_oxide.append(particles[0].u[0] / app.tng_vel_init)
