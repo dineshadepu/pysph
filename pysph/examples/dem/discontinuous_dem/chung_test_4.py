@@ -199,7 +199,6 @@ class Test4(Application):
         # When
         a_eval.evaluate(t, dt)
 
-
     def post_process(self, sim_data):
         import matplotlib.pyplot as plt
         ###############################
@@ -219,19 +218,25 @@ class Test4(Application):
         incident_angle_scraped_aa, ang_vel_scraped_aa = data[:, 0], data[:, 1]
 
         # simulated data
-        incident_angle_sim_ao, ang_vel_sim_ao = sim_data['incident_angle_sim'], sim_data['ang_vel_al_oxide']
-        incident_angle_sim_aa, ang_vel_sim_aa = sim_data['incident_angle_sim'], sim_data['ang_vel_al_alloy']
+        incident_angle_sim_ao, ang_vel_sim_ao = sim_data[
+            'incident_angle_sim'], sim_data['ang_vel_al_oxide']
+        incident_angle_sim_aa, ang_vel_sim_aa = sim_data[
+            'incident_angle_sim'], sim_data['ang_vel_al_alloy']
 
-        plt.plot(incident_angle_scraped_ao, ang_vel_scraped_ao, label='Chung Data of al.oxide')
-        plt.plot(incident_angle_scraped_aa, ang_vel_scraped_aa, label='Chung Data of al.alloy')
-        plt.scatter(incident_angle_sim_ao, ang_vel_sim_ao, label='DEM simulation of al.oxide')
-        plt.scatter(incident_angle_sim_aa, ang_vel_sim_aa, label='DEM simulation of al.alloy')
+        plt.plot(incident_angle_scraped_ao, ang_vel_scraped_ao,
+                 label='Chung Data of al.oxide')
+        plt.plot(incident_angle_scraped_aa, ang_vel_scraped_aa,
+                 label='Chung Data of al.alloy')
+        plt.scatter(incident_angle_sim_ao, ang_vel_sim_ao,
+                    label='DEM simulation of al.oxide')
+        plt.scatter(incident_angle_sim_aa, ang_vel_sim_aa,
+                    label='DEM simulation of al.alloy')
         plt.legend()
         plt.xlabel('Incident angle (degree)')
         plt.ylabel('Post-collision angular velocity (rad/s)')
         plt.xlim([0., 90.])
         plt.ylim([-800., 0.])
-        plt.show()
+        # plt.show()
         import os
         fig = os.path.join(self.output_dir, "incident_angle_vs_ang_vel.png")
         plt.savefig(fig, dpi=300)
@@ -248,32 +253,93 @@ class Test4(Application):
         data = np.loadtxt(
             './chung_test_4_incident_angle_vs_tng_restitution_al_oxide.csv',
             delimiter=',')
-        incident_angle_scraped_ao, tng_restitution_scraped_ao = data[:, 0], data[:, 1]
+        incident_angle_scraped_ao, tng_restitution_scraped_ao = (data[:, 0],
+                                                                 data[:, 1])
         # aa data
         # real data
         data = np.loadtxt(
             './chung_test_4_incident_angle_vs_tng_restitution_al_alloy.csv',
             delimiter=',')
-        incident_angle_scraped_aa, tng_restitution_scraped_aa = data[:, 0], data[:, 1]
+        incident_angle_scraped_aa, tng_restitution_scraped_aa = (data[:, 0],
+                                                                 data[:, 1])
 
         # simulated data
         # data['rebound_angle_al_oxide'] = rebound_angle_al_oxide
         # data['rebound_angle_al_alloy'] = rebound_angle_al_alloy
-        incident_angle_sim_ao, tng_rst_coeff_sim_ao = sim_data['incident_angle_sim'], sim_data['tng_rst_coeff_al_oxide']
-        incident_angle_sim_aa, tng_rst_coeff_sim_aa = sim_data['incident_angle_sim'], sim_data['tng_rst_coeff_al_alloy']
+        incident_angle_sim_ao, tng_rst_coeff_sim_ao = sim_data[
+            'incident_angle_sim'], sim_data['tng_rst_coeff_al_oxide']
+        incident_angle_sim_aa, tng_rst_coeff_sim_aa = sim_data[
+            'incident_angle_sim'], sim_data['tng_rst_coeff_al_alloy']
 
-        plt.plot(incident_angle_scraped_ao, tng_restitution_scraped_ao, label='Chung Data of al.oxide')
-        plt.plot(incident_angle_scraped_aa, tng_restitution_scraped_aa, label='Chung Data of al.alloy')
-        plt.scatter(incident_angle_sim_ao, tng_rst_coeff_sim_ao, label='DEM simulation of al.oxide')
-        plt.scatter(incident_angle_sim_aa, tng_rst_coeff_sim_aa, label='DEM simulation of al.alloy')
+        plt.plot(incident_angle_scraped_ao, tng_restitution_scraped_ao,
+                 label='Chung Data of al.oxide')
+        plt.plot(incident_angle_scraped_aa, tng_restitution_scraped_aa,
+                 label='Chung Data of al.alloy')
+        plt.scatter(incident_angle_sim_ao, tng_rst_coeff_sim_ao,
+                    label='DEM simulation of al.oxide')
+        plt.scatter(incident_angle_sim_aa, tng_rst_coeff_sim_aa,
+                    label='DEM simulation of al.alloy')
         plt.legend()
         plt.xlabel('Incident angle (degree)')
         plt.ylabel('Tangential restitution coefficient')
         plt.xlim([0., 90.])
         plt.ylim([0.4, 1.0])
-        plt.show()
-        fig = os.path.join(self.output_dir, "incident_angle_vs_tangential_coeff.png")
+        # plt.show()
+        fig = os.path.join(self.output_dir,
+                           "incident_angle_vs_tangential_coeff.png")
         plt.savefig(fig, dpi=300)
+        ###########################################
+        # tangential restitution coefficient ends #
+        ###########################################
+
+        #################
+        # rebound angle #
+        #################
+        plt.clf()
+        # ao data
+        # real data
+        data = np.loadtxt(
+            './chung_test_4_incident_angle_vs_rebound_angle_both_materials.csv',
+            delimiter=',')
+        incident_angle_scraped_ao, rebound_angle_scraped_ao = (data[:, 0],
+                                                               data[:, 1])
+        # aa data
+        # real data
+        data = np.loadtxt(
+            './chung_test_4_incident_angle_vs_rebound_angle_both_materials.csv',
+            delimiter=',')
+        incident_angle_scraped_aa, rebound_angle_scraped_aa = (data[:, 0],
+                                                               data[:, 1])
+
+        # simulated data
+        # data[''] = rebound_angle_al_oxide
+        # data['rebound_angle_al_alloy'] = rebound_angle_al_alloy
+        incident_angle_sim_ao, rebound_angle_sim_ao = sim_data[
+            'incident_angle_sim'], sim_data['rebound_angle_al_oxide']
+        incident_angle_sim_aa, rebound_angle_sim_aa = sim_data[
+            'incident_angle_sim'], sim_data['rebound_angle_al_alloy']
+
+        plt.plot(incident_angle_scraped_ao, rebound_angle_scraped_ao,
+                 label='Chung Data of al.oxide')
+        plt.plot(incident_angle_scraped_aa, rebound_angle_scraped_aa,
+                 label='Chung Data of al.alloy')
+        plt.scatter(incident_angle_sim_ao, rebound_angle_sim_ao,
+                    label='DEM simulation of al.oxide')
+        plt.scatter(incident_angle_sim_aa, rebound_angle_sim_aa,
+                    label='DEM simulation of al.alloy')
+        plt.legend()
+        plt.xlabel('Incident angle (degree)')
+        plt.ylabel('Rebound angle')
+        plt.xlim([0., 90.])
+        plt.ylim([-10, 90])
+        fig = os.path.join(self.output_dir,
+                           "incident_angle_vs_rebound_angle.png")
+        plt.savefig(fig, dpi=300)
+        plt.show()
+
+        ######################
+        # rebound angle ends #
+        ######################
 
     def customize_output(self):
         self._mayavi_config('''
