@@ -18,10 +18,11 @@ from pysph.sph.integrator import EPECIntegrator
 
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
-from pysph.dem.dem_nonlinear import (
+from pysph.dem.discontinuous_dem.dem_nonlinear import (
     get_particle_array_dem, RK2StepNonLinearDEM, ResetForces,
     TsuijiNonLinearParticleWallForceStage1,
     TsuijiNonLinearParticleWallForceStage2, UpdateTangentialContacts)
+from math import atan
 
 
 class Test4(Application):
@@ -32,17 +33,21 @@ class Test4(Application):
     def initialize(self):
         self.radius = 0.0025
         self.diameter = 2. * self.radius
-        self.tf = 0.0003
+        self.tf = 0.000012
         self.dt = 1e-6
         self.dim = 3
         # for both particles restitution
         self.en = 0.98
         # friction coefficient
         self.mu = 0.092
+        # for post processing
+        velocity = 3.9
+        radians = self.incident_angle * np.pi / 180.
+        self.tng_vel_init = velocity * np.sin(radians)
 
     def create_particles(self):
         # al oxide (ao) particle positions
-        scale = 0.0001
+        scale = 0.000001
         xao = np.array([0.])
         yao = np.array([self.radius + scale])
         yng_m = 3.8 * 1e11
@@ -137,14 +142,9 @@ class Test4(Application):
 
         dt = self.dt
         tf = self.tf
-        if dt < 1e-5:
-            pfreq = 1000
-        else:
-            pfreq = 100
-
         solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
-                        dt=dt, tf=tf, pfreq=pfreq)
-
+                        dt=dt, tf=tf)
+        solver.set_disable_output(True)
         return solver
 
     def create_equations(self):
@@ -153,9 +153,11 @@ class Test4(Application):
                 ResetForces(dest='spheres_ao', sources=None),
                 ResetForces(dest='spheres_aa', sources=None),
                 TsuijiNonLinearParticleWallForceStage1(
-                    dest='spheres_ao', sources=["wall_ao"], en=self.en, mu=0.),
+                    dest='spheres_ao', sources=["wall_ao"
+                                                ], en=self.en, mu=self.mu),
                 TsuijiNonLinearParticleWallForceStage1(
-                    dest='spheres_aa', sources=["wall_aa"], en=self.en, mu=0.)
+                    dest='spheres_aa', sources=["wall_aa"
+                                                ], en=self.en, mu=self.mu)
             ]),
         ]
 
@@ -165,55 +167,13 @@ class Test4(Application):
                 ResetForces(dest='spheres_aa', sources=None),
                 TsuijiNonLinearParticleWallForceStage2(
                     dest='spheres_ao', sources=["wall_ao"
-                                                ], en=self.en, mu=0.0),
+                                                ], en=self.en, mu=self.mu),
                 TsuijiNonLinearParticleWallForceStage2(
-                    dest='spheres_aa', sources=["wall_aa"], en=self.en, mu=0.0)
+                    dest='spheres_aa', sources=["wall_aa"
+                                                ], en=self.en, mu=self.mu)
             ]),
         ]
         return MultiStageEquations([stage1, stage2])
-
-    def post_process(self):
-        # ao data
-        # real data
-        data = np.loadtxt(
-            './chung_test_4_incident_angle_vs_post_collision_angular_velocity.csv',
-            delimiter=',')
-        incident_angle_ao, ang_vel_ao = data[:, 0], data[:, 1]
-
-        # aa data
-        # real data
-        data = np.loadtxt(
-            './chung_test_4_incident_angle_vs_post_collision_angular_velocity.csv',
-            delimiter=',')
-        incident_angle_aa, ang_vel_aa = data[:, 0], data[:, 1]
-
-        if len(self.output_files) == 0:
-            return
-
-        from pysph.solver.utils import iter_output
-        files = self.output_files
-        incident_angle, ang_vel_ao_simulated, ang_vel_aa_simulated = [], [], []
-        for sd, arrays in iter_output(files):
-            ao, aa = arrays['spheres_ao'], arrays['spheres_aa'],
-            incident_angle.append()
-            ang_vel_ao_simulated.append(-ao.wz[0])
-            ang_vel_ao_simulated.append(-aa.wz[0])
-        incident_angle = np.asarray(incident_angle)
-        ang_vel_ao_simulated = np.asarray(ang_vel_ao)
-        ang_vel_aa_simulated = np.asarray(ang_vel_aa)
-
-        import matplotlib.pyplot as plt
-        plt.plot(incident_angle, ang_vel_ao_simulated, label='ao')
-        plt.plot(incident_angle, ang_vel_aa_simulated, label='aa')
-        # plt.scatter(tg_r, fn_g_r, label='al_data')
-        # plt.scatter(tl_r, fn_l_r, label='mg_data')
-        plt.legend()
-        # plt.xlim([0.0, 1000])
-        # plt.ylim([0.0, 12])
-        import os
-        fig = os.path.join(self.output_dir, "incident_angle_vs_ang_vel.png")
-        plt.show()
-        plt.savefig(fig, dpi=300)
 
     def _make_accel_eval(self, equations, pa_arrays):
         from pysph.tools.sph_evaluator import SPHEvaluator
@@ -228,9 +188,9 @@ class Test4(Application):
         eqs1 = [
             Group(equations=[
                 UpdateTangentialContacts(dest='spheres_ao',
-                                         sources=["spheres_ao"]),
+                                         sources=["wall_ao"]),
                 UpdateTangentialContacts(dest='spheres_aa',
-                                         sources=["spheres_aa"])
+                                         sources=["wall_aa"])
             ]),
         ]
         arrays = self.particles
@@ -239,28 +199,127 @@ class Test4(Application):
         # When
         a_eval.evaluate(t, dt)
 
+
+    def post_process(self, sim_data):
+        import matplotlib.pyplot as plt
+        ###############################
+        # angular velocity comparison #
+        ###############################
+        # ao data
+        # real data
+        data = np.loadtxt(
+            './chung_test_4_incident_angle_vs_post_collision_angular_velocity.csv',
+            delimiter=',')
+        incident_angle_scraped_ao, ang_vel_scraped_ao = data[:, 0], data[:, 1]
+        # aa data
+        # real data
+        data = np.loadtxt(
+            './chung_test_4_incident_angle_vs_post_collision_angular_velocity.csv',
+            delimiter=',')
+        incident_angle_scraped_aa, ang_vel_scraped_aa = data[:, 0], data[:, 1]
+
+        # simulated data
+        incident_angle_sim_ao, ang_vel_sim_ao = sim_data['incident_angle_sim'], sim_data['ang_vel_al_oxide']
+        incident_angle_sim_aa, ang_vel_sim_aa = sim_data['incident_angle_sim'], sim_data['ang_vel_al_alloy']
+
+        plt.plot(incident_angle_scraped_ao, ang_vel_scraped_ao, label='Chung Data of al.oxide')
+        plt.plot(incident_angle_scraped_aa, ang_vel_scraped_aa, label='Chung Data of al.alloy')
+        plt.scatter(incident_angle_sim_ao, ang_vel_sim_ao, label='DEM simulation of al.oxide')
+        plt.scatter(incident_angle_sim_aa, ang_vel_sim_aa, label='DEM simulation of al.alloy')
+        plt.legend()
+        plt.xlabel('Incident angle (degree)')
+        plt.ylabel('Post-collision angular velocity (rad/s)')
+        plt.xlim([0., 90.])
+        plt.ylim([-800., 0.])
+        plt.show()
+        import os
+        fig = os.path.join(self.output_dir, "incident_angle_vs_ang_vel.png")
+        plt.savefig(fig, dpi=300)
+        #####################################
+        # angular velocity comparison  ends #
+        #####################################
+
+        ######################################
+        # tangential restitution coefficient #
+        ######################################
+        plt.clf()
+        # ao data
+        # real data
+        data = np.loadtxt(
+            './chung_test_4_incident_angle_vs_tng_restitution_al_oxide.csv',
+            delimiter=',')
+        incident_angle_scraped_ao, tng_restitution_scraped_ao = data[:, 0], data[:, 1]
+        # aa data
+        # real data
+        data = np.loadtxt(
+            './chung_test_4_incident_angle_vs_tng_restitution_al_alloy.csv',
+            delimiter=',')
+        incident_angle_scraped_aa, tng_restitution_scraped_aa = data[:, 0], data[:, 1]
+
+        # simulated data
+        # data['rebound_angle_al_oxide'] = rebound_angle_al_oxide
+        # data['rebound_angle_al_alloy'] = rebound_angle_al_alloy
+        incident_angle_sim_ao, tng_rst_coeff_sim_ao = sim_data['incident_angle_sim'], sim_data['tng_rst_coeff_al_oxide']
+        incident_angle_sim_aa, tng_rst_coeff_sim_aa = sim_data['incident_angle_sim'], sim_data['tng_rst_coeff_al_alloy']
+
+        plt.plot(incident_angle_scraped_ao, tng_restitution_scraped_ao, label='Chung Data of al.oxide')
+        plt.plot(incident_angle_scraped_aa, tng_restitution_scraped_aa, label='Chung Data of al.alloy')
+        plt.scatter(incident_angle_sim_ao, tng_rst_coeff_sim_ao, label='DEM simulation of al.oxide')
+        plt.scatter(incident_angle_sim_aa, tng_rst_coeff_sim_aa, label='DEM simulation of al.alloy')
+        plt.legend()
+        plt.xlabel('Incident angle (degree)')
+        plt.ylabel('Tangential restitution coefficient')
+        plt.xlim([0., 90.])
+        plt.ylim([0.4, 1.0])
+        plt.show()
+        fig = os.path.join(self.output_dir, "incident_angle_vs_tangential_coeff.png")
+        plt.savefig(fig, dpi=300)
+
     def customize_output(self):
         self._mayavi_config('''
         b = particle_arrays['spheres_ao']
         b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = {radius}
         b.scalar = 'wz'
-        b.show_legend = True
         b = particle_arrays['spheres_aa']
         b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = {radius}
         b.scalar = 'wz'
-        b.show_legend = True
         '''.format(radius=self.radius))
 
 
 if __name__ == '__main__':
-    # incident_angle = [5., 10., 20., 25., 30., 35., 40., 50., 60., 70., 80., 85.]
-    incident_angle = [30.]
+    incident_angle = [
+        5., 10., 20., 25., 30., 35., 40., 50., 60., 70., 80., 85.
+    ]
+    ang_vel_al_oxide = []
+    tng_rst_coeff_al_oxide = []
+    rebound_angle_al_oxide = []
+    ang_vel_al_alloy = []
+    tng_rst_coeff_al_alloy = []
+    rebound_angle_al_alloy = []
     for i in incident_angle:
         app = Test4(fname="chung_test_4_" + str(i), theta=i)
         app.run()
-        # particles = app.particles[1]
-        # print("en is " + str(i))
-        # print(particles.u[0] / -3.9)
-    # app.post_process()
+        particles = app.particles
+        ang_vel_al_oxide.append(particles[0].wz[0])
+        tng_rst_coeff_al_oxide.append(particles[0].u[0] / app.tng_vel_init)
+        rebound_angle_al_oxide.append(
+            atan(particles[0].u[0] / particles[0].v[0]) * 180 / np.pi)
+
+        ang_vel_al_alloy.append(particles[1].wz[0])
+        tng_rst_coeff_al_alloy.append(particles[1].u[0] / app.tng_vel_init)
+        rebound_angle_al_alloy.append(
+            atan(particles[1].u[0] / particles[1].v[0]) * 180 / np.pi)
+
+    # save the simulation data for the post processing
+    data = {}
+    data['incident_angle_sim'] = incident_angle
+    data['tng_rst_coeff_al_oxide'] = tng_rst_coeff_al_oxide
+    data['ang_vel_al_oxide'] = ang_vel_al_oxide
+    data['rebound_angle_al_oxide'] = rebound_angle_al_oxide
+
+    data['tng_rst_coeff_al_alloy'] = tng_rst_coeff_al_alloy
+    data['ang_vel_al_alloy'] = ang_vel_al_alloy
+    data['rebound_angle_al_alloy'] = rebound_angle_al_alloy
+    app.post_process(data)

@@ -549,9 +549,10 @@ class TsuijiNonLinearParticleWallForceStage1(Equation):
                 d_fy[d_idx] += fn_y + ft0_y
                 d_fz[d_idx] += fn_z + ft0_z
 
-                d_torx[d_idx] += (ft0_y * nzc - ft0_z * nyc) * a_d
-                d_tory[d_idx] += (ft0_z * nxc - ft0_x * nzc) * a_d
-                d_torz[d_idx] += (ft0_x * nyc - ft0_y * nxc) * a_d
+                # torque = n cross F
+                d_torx[d_idx] += (nyc * ft0_z - nzc * ft0_y) * a_d
+                d_tory[d_idx] += (nzc * ft0_x - nxc * ft0_z) * a_d
+                d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_d
 
 
 class TsuijiNonLinearParticleWallForceStage2(Equation):
@@ -893,9 +894,10 @@ class TsuijiNonLinearParticleWallForceStage2(Equation):
                 d_fy[d_idx] += fn_y + ft0_y
                 d_fz[d_idx] += fn_z + ft0_z
 
-                d_torx[d_idx] += (ft0_y * nzc - ft0_z * nyc) * a_d
-                d_tory[d_idx] += (ft0_z * nxc - ft0_x * nzc) * a_d
-                d_torz[d_idx] += (ft0_x * nyc - ft0_y * nxc) * a_d
+                # torque = n cross F
+                d_torx[d_idx] += (nyc * ft0_z - nzc * ft0_y) * a_d
+                d_tory[d_idx] += (nzc * ft0_x - nxc * ft0_z) * a_d
+                d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_d
             else:
                 if found == 1:
                     d_vtx[found_at] = 0.
