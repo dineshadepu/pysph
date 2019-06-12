@@ -5,6 +5,7 @@ from pysph.base.reduce_array import parallel_reduce_array
 from pysph.sph.equation import Equation
 from pysph.base.utils import get_particle_array
 from pysph.sph.integrator_step import IntegratorStep
+from pysph.sph.scheme import Scheme
 import numpy as np
 import numpy
 from math import sqrt, asin, sin, cos, pi, log
@@ -231,6 +232,13 @@ class RigidBodyMotion(Equation):
         d_u[d_idx] = d_vc[base + 0] + wy*rz - wz*ry
         d_v[d_idx] = d_vc[base + 1] + wz*rx - wx*rz
         d_w[d_idx] = d_vc[base + 2] + wx*ry - wy*rx
+
+
+class ResetForces(Equation):
+    def initialize(self, d_idx, d_fx, d_fy, d_fz):
+        d_fx[d_idx] = 0.
+        d_fy[d_idx] = 0.
+        d_fz[d_idx] = 0.
 
 
 class BodyForce(Equation):
@@ -1647,6 +1655,83 @@ class RK2StepRigidBodyDEM(IntegratorStep):
             d_tng_z[i] = d_tng_z0[i] + d_vtz[i] * dt
 
 
+class RigidBodySimpleScheme(Scheme):
+    def __init__(self, bodies, solids, dim, rho0, kn,
+                 mu=0.5, en=1.0,
+                 gx=0.0, gy=0.0, gz=0.0,
+                 debug=False):
+        self.bodies = bodies
+        self.solids = solids
+        self.dim = dim
+        self.rho0 = rho0
+        self.kn = kn
+        self.mu = mu
+        self.en = en
+        self.gx = gx
+        self.gy = gy
+        self.gz = gz
+        self.debug = debug
+
+    def configure_solver(self, kernel=None, integrator_cls=None,
+                         extra_steppers=None, **kw):
+        from pysph.base.kernels import CubicSpline
+        from pysph.sph.integrator import EPECIntegrator
+        from pysph.solver.solver import Solver
+        if kernel is None:
+            kernel = CubicSpline(dim=self.dim)
+
+        steppers = {}
+        if extra_steppers is not None:
+            steppers.update(extra_steppers)
+
+        for body in self.bodies:
+            if body not in steppers:
+                steppers[body] = RK2StepRigidBody()
+
+        cls = integrator_cls if integrator_cls is not None else EPECIntegrator
+        integrator = cls(**steppers)
+
+        self.solver = Solver(
+            dim=self.dim, integrator=integrator, kernel=kernel, **kw
+        )
+
+    def get_equations(self):
+        from pysph.sph.equation import Group
+        equations = []
+        g1 = []
+        if self.solids is not None:
+            all = self.bodies + self.solids
+        else:
+            all = self.bodies
+
+        for name in self.bodies:
+            g1.append(BodyForce(
+                dest=name, sources=None, gx=self.gx, gy=self.gy, gz=self.gz
+            ))
+        equations.append(Group(equations=g1, real=False))
+
+        g2 = []
+        for name in self.bodies:
+            g2.append(RigidBodyCollision(
+                dest=name, sources=all, kn=self.kn, mu=self.mu, en=self.en
+            ))
+        equations.append(Group(equations=g2, real=False))
+
+        g3 = []
+        for name in self.bodies:
+            g3.append(RigidBodyMoments(
+                dest=name, sources=None))
+        equations.append(Group(equations=g3, real=False))
+
+        g4 = []
+        for name in self.bodies:
+            g4.append(RigidBodyMotion(
+                dest=name, sources=None))
+        equations.append(Group(equations=g4, real=False))
+
+        return equations
+
+
 #################################################
 # Rigid body simulation using rotation matrices #
 #################################################
@@ -1686,7 +1771,8 @@ def get_particle_array_rigid_body_rotation_matrix(constants=None, **props):
                             **props)
     setup_rotation_matrix_rigid_body(pa)
 
-    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz'])
+    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz',
+                          'm'])
     return pa
 
 
@@ -1739,17 +1825,10 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
     def py_stage1(self, dst, t, dt):
         dtb2 = dt / 2.
         for j in range(3):
-            # update center of mass position and velocity
-            # move linear velocity to t + dt/2.
-            dst.vc[j] = dst.vc[j] + (
-                dtb2 * dst.force[j] / dst.total_mass[0])
-            # using velocity at t + dt/2., move position
+            # using velocity at t, move position
             # to t + dt/2.
             dst.cm[j] = dst.cm[j] + dtb2 * dst.vc[j]
-
-        # move angular velocity to t + dt/2.
-        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
-                                           dst.torque) * dtb2
+            dst.vc[j] = dst.vc[j] + dtb2 * dst.force[j] / dst.total_mass[0]
         # angular velocity in terms of matrix
         omega_mat = np.array([[0, -dst.omega[2], dst.omega[1]],
                               [dst.omega[2], 0, -dst.omega[0]],
@@ -1773,6 +1852,9 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
         R_t = R.transpose()
         tmp = np.matmul(R, dst.mib.reshape(3, 3))
         dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
+        # move angular velocity to t + dt/2.
+        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
+                                           dst.torque) * dtb2
 
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
                d_cm, d_vc, d_R, d_omega):
@@ -1807,23 +1889,19 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
 
     def py_stage2(self, dst, t, dt):
         for j in range(3):
-            # update center of mass position and velocity
-            # move linear velocity to t + dt/2.
-            dst.vc[j] = dst.vc[j] + (
-                dt * dst.force[j] / dst.total_mass[0])
             # using velocity at t + dt/2., move position
-            # to t + dt/2.
-            dst.cm[j] = dst.cm[j] + dt * dst.vc[j]
+            # to t + dt
+            dst.cm[j] = dst.cm0[j] + dt * dst.vc[j]
+            # move linear velocity to t + dt
+            dst.vc[j] = dst.vc0[j] + (
+                dt * dst.force[j] / dst.total_mass[0])
 
-        # move angular velocity to t + dt/2.
-        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
-                                           dst.torque) * dt
         # angular velocity in terms of matrix
         omega_mat = np.array([[0, -dst.omega[2], dst.omega[1]],
                               [dst.omega[2], 0, -dst.omega[0]],
                               [-dst.omega[1], dst.omega[0], 0]])
 
-        # Currently the orientation is at time t
+        # Currently the orientation is at time t + dt/2.
         R = dst.R.reshape(3, 3)
 
         # Rate of change of orientation is
@@ -1841,6 +1919,10 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
         R_t = R.transpose()
         tmp = np.matmul(R, dst.mib.reshape(3, 3))
         dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
+
+        # move angular velocity to t + dt
+        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
+                                           dst.torque) * dt
 
     def stage2(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
                d_cm, d_vc, d_R, d_omega):
@@ -1874,10 +1956,80 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
         d_w[d_idx] = d_vc[2] + dw
 
 
+class RigidBodyRotationMatricesScheme(Scheme):
+    def __init__(self, bodies, solids, dim, rho0, kn,
+                 mu=0.5, en=1.0,
+                 gx=0.0, gy=0.0, gz=0.0,
+                 debug=False):
+        self.bodies = bodies
+        self.solids = solids
+        self.dim = dim
+        self.rho0 = rho0
+        self.kn = kn
+        self.mu = mu
+        self.en = en
+        self.gx = gx
+        self.gy = gy
+        self.gz = gz
+        self.debug = debug
+
+    def configure_solver(self, kernel=None, integrator_cls=None,
+                         extra_steppers=None, **kw):
+        from pysph.base.kernels import CubicSpline
+        from pysph.sph.integrator import EPECIntegrator
+        from pysph.solver.solver import Solver
+        if kernel is None:
+            kernel = CubicSpline(dim=self.dim)
+
+        steppers = {}
+        if extra_steppers is not None:
+            steppers.update(extra_steppers)
+
+        for body in self.bodies:
+            if body not in steppers:
+                steppers[body] = RK2StepRigidBodyRotationMatrices()
+
+        cls = integrator_cls if integrator_cls is not None else EPECIntegrator
+        integrator = cls(**steppers)
+
+        self.solver = Solver(
+            dim=self.dim, integrator=integrator, kernel=kernel, **kw
+        )
+
+    def get_equations(self):
+        from pysph.sph.equation import Group
+        equations = []
+        g1 = []
+        if self.solids is not None:
+            all = self.bodies + self.solids
+        else:
+            all = self.bodies
+
+        for name in self.bodies:
+            g1.append(BodyForce(
+                dest=name, sources=None, gx=self.gx, gy=self.gy, gz=self.gz
+            ))
+        equations.append(Group(equations=g1, real=False))
+
+        g2 = []
+        for name in self.bodies:
+            g2.append(RigidBodyCollision(
+                dest=name, sources=all, kn=self.kn, mu=self.mu, en=self.en
+            ))
+        equations.append(Group(equations=g2, real=False))
+
+        g3 = []
+        for name in self.bodies:
+            g3.append(SumUpExternalForces(
+                dest=name, sources=None))
+        equations.append(Group(equations=g3, real=False))
+
+        return equations
+
+
 ##########################################
 # Rigid body simulation using quaternion #
 ##########################################
-
 class SumUpExternalForces(Equation):
     def reduce(self, dst, t, dt):
         frc = declare('object')
@@ -1959,7 +2111,7 @@ def get_particle_array_rigid_body_quaternion(constants=None, **props):
                             **props)
     setup_quaternion_rigid_body(pa)
 
-    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz'])
+    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz', 'm'])
     return pa
 
 
@@ -2019,17 +2171,10 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
     def py_stage1(self, dst, t, dt):
         dtb2 = dt / 2.
         for j in range(3):
-            # update center of mass position and velocity
-            # move linear velocity to t + dt/2.
-            dst.vc[j] = dst.vc0[j] + (
-                dtb2 * dst.force[j] / dst.total_mass[0])
-            # using velocity at t + dt/2., move position
+            # using velocity at t, move position
             # to t + dt/2.
-            dst.cm[j] = dst.cm0[j] + dtb2 * dst.vc[j]
-
-        # move angular velocity to t + dt/2.
-        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
-                                           dst.torque) * dtb2
+            dst.cm[j] = dst.cm[j] + dtb2 * dst.vc[j]
+            dst.vc[j] = dst.vc[j] + dtb2 * dst.force[j] / dst.total_mass[0]
         # Rate of change of orientation is
         omega_q_multiplication(dst.omega, dst.q, dst.qdot)
 
@@ -2045,6 +2190,9 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
         R_t = dst.R.reshape(3, 3).transpose()
         tmp = np.matmul(R, dst.mib.reshape(3, 3))
         dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
+        # move angular velocity to t + dt/2.
+        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
+                                           dst.torque) * dtb2
 
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
                d_cm, d_vc, d_R, d_omega):
@@ -2079,17 +2227,8 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
 
     def py_stage2(self, dst, t, dt):
         for j in range(3):
-            # update center of mass position and velocity
-            # move linear velocity to t + dt
-            dst.vc[j] = dst.vc0[j] + (
-                dt * dst.force[j] / dst.total_mass[0])
-            # using velocity at t + dt, move position
-            # to t + dt
             dst.cm[j] = dst.cm0[j] + dt * dst.vc[j]
-
-        # move angular velocity to t + dt/2.
-        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
-                                           dst.torque) * dt
+            dst.vc[j] = dst.vc0[j] + dt * dst.force[j] / dst.total_mass[0]
         # Rate of change of orientation is
         omega_q_multiplication(dst.omega, dst.q, dst.qdot)
 
@@ -2104,7 +2243,10 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
         R = dst.R.reshape(3, 3)
         R_t = dst.R.reshape(3, 3).transpose()
         tmp = np.matmul(R, dst.mib.reshape(3, 3))
-        dst.mig[:] = np.matmul(tmp, R_t).ravel()
+        dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
+        # move angular velocity to t + dt
+        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
+                                           dst.torque) * dt
 
     def stage2(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
                d_cm, d_vc, d_R, d_omega):
@@ -2136,3 +2278,74 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
         d_u[d_idx] = d_vc[0] + du
         d_v[d_idx] = d_vc[1] + dv
         d_w[d_idx] = d_vc[2] + dw
+
+
+class RigidBodyQuaternionScheme(Scheme):
+    def __init__(self, bodies, solids, dim, rho0, kn,
+                 mu=0.5, en=1.0,
+                 gx=0.0, gy=0.0, gz=0.0,
+                 debug=False):
+        self.bodies = bodies
+        self.solids = solids
+        self.dim = dim
+        self.rho0 = rho0
+        self.kn = kn
+        self.mu = mu
+        self.en = en
+        self.gx = gx
+        self.gy = gy
+        self.gz = gz
+        self.debug = debug
+
+    def configure_solver(self, kernel=None, integrator_cls=None,
+                         extra_steppers=None, **kw):
+        from pysph.base.kernels import CubicSpline
+        from pysph.sph.integrator import EPECIntegrator
+        from pysph.solver.solver import Solver
+        if kernel is None:
+            kernel = CubicSpline(dim=self.dim)
+
+        steppers = {}
+        if extra_steppers is not None:
+            steppers.update(extra_steppers)
+
+        for body in self.bodies:
+            if body not in steppers:
+                steppers[body] = RK2StepRigidBodyQuaternions()
+
+        cls = integrator_cls if integrator_cls is not None else EPECIntegrator
+        integrator = cls(**steppers)
+
+        self.solver = Solver(
+            dim=self.dim, integrator=integrator, kernel=kernel, **kw
+        )
+
+    def get_equations(self):
+        from pysph.sph.equation import Group
+        equations = []
+        g1 = []
+        if self.solids is not None:
+            all = self.bodies + self.solids
+        else:
+            all = self.bodies
+
+        for name in self.bodies:
+            g1.append(BodyForce(
+                dest=name, sources=None, gx=self.gx, gy=self.gy, gz=self.gz
+            ))
+        equations.append(Group(equations=g1, real=False))
+
+        g2 = []
+        for name in self.bodies:
+            g2.append(RigidBodyCollision(
+                dest=name, sources=all, kn=self.kn, mu=self.mu, en=self.en
+            ))
+        equations.append(Group(equations=g2, real=False))
+
+        g3 = []
+        for name in self.bodies:
+            g3.append(SumUpExternalForces(
+                dest=name, sources=None))
+        equations.append(Group(equations=g3, real=False))
+
+        return equations

@@ -288,7 +288,6 @@ def get_particle_array_rigid_body(constants=None, **props):
         consts.update(constants)
     pa = get_particle_array(constants=consts, additional_props=extra_props,
                             **props)
-    print(body_id)
     pa.add_property('body_id', type='int', data=body_id)
     pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'rho', 'h', 'm',
                           'p', 'pid', 'au', 'av', 'aw', 'tag', 'gid', 'V',

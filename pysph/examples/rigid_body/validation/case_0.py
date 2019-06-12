@@ -7,64 +7,83 @@ import numpy as np
 
 from pysph.base.kernels import CubicSpline
 from pysph.base.utils import get_particle_array_rigid_body
-from pysph.sph.equation import Group
-
 from pysph.sph.integrator import EPECIntegrator
-
 from pysph.solver.application import Application
-from pysph.solver.solver import Solver
-from pysph.sph.rigid_body import (BodyForce, RigidBodyCollision,
-                                  RigidBodyMoments, RigidBodyMotion,
-                                  RK2StepRigidBody)
-
-dim = 3
-
-dt = 5e-3
-tf = 5.0
-gz = -9.81
-
-hdx = 1.0
-dx = dy = 0.02
-rho0 = 10.0
+from pysph.sph.scheme import SchemeChooser
+from pysph.sph.rigid_body import (
+    RigidBodySimpleScheme, RigidBodyRotationMatricesScheme,
+    RigidBodyQuaternionScheme,
+    get_particle_array_rigid_body_rotation_matrix,
+    get_particle_array_rigid_body_quaternion)
+from pysph.examples.solid_mech.impact import add_properties
 
 
 class Case0(Application):
+    def initialize(self):
+        self.rho0 = 10.0
+        self.hdx = 1.3
+        self.dx = 0.02
+        self.dy = 0.02
+        self.kn = 1e4
+        self.mu = 0.5
+        self.en = 1.0
+        self.dim = 3
+
+    def create_scheme(self):
+        # rbss = RigidBodySimpleScheme
+        rbss = RigidBodySimpleScheme(bodies=['body'], solids=None, dim=3,
+                                     rho0=self.rho0, kn=self.kn, mu=self.mu,
+                                     en=self.en)
+        rbrms = RigidBodyRotationMatricesScheme(
+            bodies=['body'], solids=None, dim=3, rho0=self.rho0, kn=self.kn,
+            mu=self.mu, en=self.en)
+        rbqs = RigidBodyQuaternionScheme(
+            bodies=['body'], solids=None, dim=3, rho0=self.rho0, kn=self.kn,
+            mu=self.mu, en=self.en)
+        s = SchemeChooser(default='rbss', rbss=rbss, rbrms=rbrms, rbqs=rbqs)
+        return s
+
+    def configure_scheme(self):
+        scheme = self.scheme
+        kernel = CubicSpline(dim=self.dim)
+        tf = 5.
+        dt = 1e-3
+        scheme.configure()
+        scheme.configure_solver(kernel=kernel, integrator_cls=EPECIntegrator,
+                                dt=dt, tf=tf)
+
     def create_particles(self):
         nx, ny, nz = 10, 10, 10
-        dx = 1.0 / (nx - 1)
+        dx = self.dx
         x, y, z = np.mgrid[0:1:nx * 1j, 0:1:ny * 1j, 0:1:nz * 1j]
         x = x.flat
         y = y.flat
         z = (z - 1).flat
-        m = np.ones_like(x) * dx * dx * rho0
-        h = np.ones_like(x) * hdx * dx
+        m = np.ones_like(x) * dx * dx * self.rho0
+        h = np.ones_like(x) * self.hdx * dx
         # radius of each sphere constituting in cube
         rad_s = np.ones_like(x) * dx
         body = get_particle_array_rigid_body(name='body', x=x, y=y, z=z, h=h,
                                              m=m, rad_s=rad_s)
 
-        print("here")
-        body.vc[0] = 0.1
-        body.vc[1] = 0.1
+        if self.options.scheme == 'rbrms':
+            body = get_particle_array_rigid_body_rotation_matrix(
+                name='body', x=x, y=y, z=z, h=h, m=m, rad_s=rad_s)
+            add_properties(body, 'tang_velocity_z', 'tang_disp_y',
+                           'tang_velocity_x', 'tang_disp_x', 'tang_velocity_y',
+                           'tang_disp_z')
+
+        elif self.options.scheme == 'rbqs':
+            body = get_particle_array_rigid_body_quaternion(
+                name='body', x=x, y=y, z=z, h=h, m=m, rad_s=rad_s)
+            add_properties(body, 'tang_velocity_z', 'tang_disp_y',
+                           'tang_velocity_x', 'tang_disp_x', 'tang_velocity_y',
+                           'tang_disp_z')
+
+        body.vc[0] = 0.5
+        body.vc[1] = 0.5
         body.omega[2] = 1.
         return [body]
-
-    def create_solver(self):
-        kernel = CubicSpline(dim=dim)
-
-        integrator = EPECIntegrator(body=RK2StepRigidBody())
-
-        solver = Solver(kernel=kernel, dim=dim, integrator=integrator, dt=dt,
-                        tf=tf, adaptive_timestep=False)
-        solver.set_print_freq(10)
-        return solver
-
-    def create_equations(self):
-        equations = [
-            Group(equations=[RigidBodyMoments(dest='body', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='body', sources=None)]),
-        ]
-        return equations
 
 
 if __name__ == '__main__':
