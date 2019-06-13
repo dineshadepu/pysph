@@ -2193,13 +2193,23 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
             # to t + dt/2.
             dst.cm[j] = dst.cm[j] + dtb2 * dst.vc[j]
             dst.vc[j] = dst.vc[j] + dtb2 * dst.force[j] / dst.total_mass[0]
-        # Rate of change of orientation is
-        omega_quat = np.array([0., dst.omega[0], dst.omega[1], dst.omega[2]])
-        quaternion_multiplication(omega_quat, dst.q, dst.qdot)
-        scale_quaternion(dst.qdot, 0.5)
 
-        # update the orientation to next time step
-        dst.q[:] = dst.q0[:] + dst.qdot[:] * dtb2
+        # delta quaternion (change in quaternion)
+        delta_quat = np.array([0., 0., 0., 0.])
+        # angular velocity magnitude
+        omega_magn = sqrt(dst.omega[0]**2 + dst.omega[1]**2 + dst.omega[2]**2)
+        axis_rot = np.array([0., 0., 0.])
+        if omega_magn > 0:
+            axis_rot = dst.omega / omega_magn
+        print(omega_magn * dtb2 * 0.5)
+        delta_quat[0] = cos(omega_magn * dtb2 * 0.5)
+        delta_quat[1] = axis_rot[0] * sin(omega_magn * dtb2 * 0.5)
+        delta_quat[2] = axis_rot[1] * sin(omega_magn * dtb2 * 0.5)
+        delta_quat[3] = axis_rot[2] * sin(omega_magn * dtb2 * 0.5)
+
+        res = np.array([0., 0., 0., 0.])
+        quaternion_multiplication(dst.q, delta_quat, res)
+        dst.q = res
 
         # normalize the orientation
         normalize_q_orientation(dst.q)
@@ -2252,24 +2262,33 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
         for j in range(3):
             dst.cm[j] = dst.cm0[j] + dt * dst.vc[j]
             dst.vc[j] = dst.vc0[j] + dt * dst.force[j] / dst.total_mass[0]
-        # Rate of change of orientation is
-        omega_quat = np.array([0., dst.omega[0], dst.omega[1], dst.omega[2]])
-        quaternion_multiplication(omega_quat, dst.q, dst.qdot)
-        scale_quaternion(dst.qdot, 0.5)
 
-        # update the orientation to next time step
-        dst.q[:] = dst.q0[:] + dst.qdot[:] * dt
+        # delta quaternion (change in quaternion)
+        delta_quat = np.array([0., 0., 0., 0.])
+        # angular velocity magnitude
+        omega_magn = sqrt(dst.omega[0]**2 + dst.omega[1]**2 + dst.omega[2]**2)
+        axis_rot = np.array([0., 0., 0.])
+        if omega_magn > 0:
+            axis_rot = dst.omega / omega_magn
+        delta_quat[0] = cos(omega_magn * dt * 0.5)
+        delta_quat[1] = axis_rot[0] * sin(omega_magn * dt * 0.5)
+        delta_quat[2] = axis_rot[1] * sin(omega_magn * dt * 0.5)
+        delta_quat[3] = axis_rot[2] * sin(omega_magn * dt * 0.5)
+
+        res = np.array([0., 0., 0., 0.])
+        quaternion_multiplication(dst.q0, delta_quat, res)
+        dst.q = res
 
         # normalize the orientation
-        normalize_q_orientation(dst.q)
+        # normalize_q_orientation(dst.q)
 
         # update the moment of inertia
         quaternion_to_matrix(dst.q, dst.R)
         R = dst.R.reshape(3, 3)
-        R_t = R.transpose()
+        R_t = R.T
         tmp = np.matmul(R, dst.mib.reshape(3, 3))
         dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
-        # move angular velocity to t + dt
+        # move angular velocity to t + dt/2.
         # omega_dot is
         tmp = dst.torque - np.cross(
             dst.omega, np.matmul(dst.mig.reshape(3, 3), dst.omega))
