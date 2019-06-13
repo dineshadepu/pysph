@@ -9,7 +9,6 @@ from pysph.sph.scheme import Scheme
 import numpy as np
 import numpy
 from math import sqrt, asin, sin, cos, pi, log
-from pysph.base.utils import get_particle_array
 from pysph.sph.rigid_body_setup import (setup_quaternion_rigid_body,
                                         setup_rotation_matrix_rigid_body)
 
@@ -1736,8 +1735,10 @@ class RigidBodySimpleScheme(Scheme):
 # Rigid body simulation using rotation matrices #
 #################################################
 def get_particle_array_rigid_body_rotation_matrix(constants=None, **props):
-    extra_props = ['fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0',
-                   'nx', 'ny', 'nz']
+    extra_props = [
+        'fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0', 'nx', 'ny',
+        'nz'
+    ]
 
     consts = {
         'total_mass': 0.,
@@ -1771,8 +1772,7 @@ def get_particle_array_rigid_body_rotation_matrix(constants=None, **props):
                             **props)
     setup_rotation_matrix_rigid_body(pa)
 
-    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz',
-                          'm'])
+    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz', 'm'])
     return pa
 
 
@@ -1853,8 +1853,11 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
         tmp = np.matmul(R, dst.mib.reshape(3, 3))
         dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
         # move angular velocity to t + dt/2.
-        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
-                                           dst.torque) * dtb2
+        # omega_dot is
+        tmp = dst.torque - np.cross(
+            dst.omega, np.matmul(dst.mig.reshape(3, 3), dst.omega))
+        omega_dot = np.matmul(dst.mig.reshape(3, 3), tmp)
+        dst.omega = dst.omega0 + omega_dot * dtb2
 
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
                d_cm, d_vc, d_R, d_omega):
@@ -1893,8 +1896,7 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
             # to t + dt
             dst.cm[j] = dst.cm0[j] + dt * dst.vc[j]
             # move linear velocity to t + dt
-            dst.vc[j] = dst.vc0[j] + (
-                dt * dst.force[j] / dst.total_mass[0])
+            dst.vc[j] = dst.vc0[j] + (dt * dst.force[j] / dst.total_mass[0])
 
         # angular velocity in terms of matrix
         omega_mat = np.array([[0, -dst.omega[2], dst.omega[1]],
@@ -1921,8 +1923,10 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
         dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
 
         # move angular velocity to t + dt
-        dst.omega = dst.omega0 + np.matmul(dst.mig.reshape(3, 3),
-                                           dst.torque) * dt
+        tmp = dst.torque - np.cross(
+            dst.omega, np.matmul(dst.mig.reshape(3, 3), dst.omega))
+        omega_dot = np.matmul(dst.mig.reshape(3, 3), tmp)
+        dst.omega = dst.omega0 + omega_dot * dt
 
     def stage2(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
                d_cm, d_vc, d_R, d_omega):
@@ -1957,10 +1961,8 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
 
 
 class RigidBodyRotationMatricesScheme(Scheme):
-    def __init__(self, bodies, solids, dim, rho0, kn,
-                 mu=0.5, en=1.0,
-                 gx=0.0, gy=0.0, gz=0.0,
-                 debug=False):
+    def __init__(self, bodies, solids, dim, rho0, kn, mu=0.5, en=1.0, gx=0.0,
+                 gy=0.0, gz=0.0, debug=False):
         self.bodies = bodies
         self.solids = solids
         self.dim = dim
@@ -1992,9 +1994,8 @@ class RigidBodyRotationMatricesScheme(Scheme):
         cls = integrator_cls if integrator_cls is not None else EPECIntegrator
         integrator = cls(**steppers)
 
-        self.solver = Solver(
-            dim=self.dim, integrator=integrator, kernel=kernel, **kw
-        )
+        self.solver = Solver(dim=self.dim, integrator=integrator,
+                             kernel=kernel, **kw)
 
     def get_equations(self):
         from pysph.sph.equation import Group
@@ -2006,22 +2007,21 @@ class RigidBodyRotationMatricesScheme(Scheme):
             all = self.bodies
 
         for name in self.bodies:
-            g1.append(BodyForce(
-                dest=name, sources=None, gx=self.gx, gy=self.gy, gz=self.gz
-            ))
+            g1.append(
+                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy,
+                          gz=self.gz))
         equations.append(Group(equations=g1, real=False))
 
         g2 = []
         for name in self.bodies:
-            g2.append(RigidBodyCollision(
-                dest=name, sources=all, kn=self.kn, mu=self.mu, en=self.en
-            ))
+            g2.append(
+                RigidBodyCollision(dest=name, sources=all, kn=self.kn,
+                                   mu=self.mu, en=self.en))
         equations.append(Group(equations=g2, real=False))
 
         g3 = []
         for name in self.bodies:
-            g3.append(SumUpExternalForces(
-                dest=name, sources=None))
+            g3.append(SumUpExternalForces(dest=name, sources=None))
         equations.append(Group(equations=g3, real=False))
 
         return equations
@@ -2076,8 +2076,8 @@ class SumUpExternalForces(Equation):
 
 def get_particle_array_rigid_body_quaternion(constants=None, **props):
     extra_props = [
-        'fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0',
-        'nx', 'ny', 'nz'
+        'fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0', 'nx', 'ny',
+        'nz', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0'
     ]
 
     consts = {
