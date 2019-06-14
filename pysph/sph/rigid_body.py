@@ -1769,6 +1769,7 @@ def get_particle_array_rigid_body_rotation_matrix(constants=None, **props):
         # angular velocity in global frame
         'omega': numpy.zeros(3*nb, dtype=float),
         'omega0': numpy.zeros(3*nb, dtype=float),
+        'nb': nb
     }
     if constants:
         consts.update(constants)
@@ -1780,7 +1781,8 @@ def get_particle_array_rigid_body_rotation_matrix(constants=None, **props):
 
     setup_rotation_matrix_rigid_body(pa)
 
-    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz', 'm'])
+    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz', 'm',
+                          'body_id'])
     return pa
 
 
@@ -1814,75 +1816,86 @@ def normalize_R_orientation(orien):
 
 class RK2StepRigidBodyRotationMatrices(IntegratorStep):
     def py_initialize(self, dst, t, dt):
-        for j in range(3):
-            # save the center of mass and center of mass velocity
-            dst.cm0[j] = dst.cm[j]
-            dst.vc0[j] = dst.vc[j]
+        for i in range(dst.nb[0]):
+            for j in range(3):
+                # save the center of mass and center of mass velocity
+                dst.cm0[3*i+j] = dst.cm[3*i+j]
+                dst.vc0[3*i+j] = dst.vc[3*i+j]
 
-            # save the current angular momentum
-            # dst.L0[j] = dst.L[j]
-            dst.omega0[j] = dst.omega[j]
+                # save the current angular momentum
+                # dst.L0[j] = dst.L[j]
+                dst.omega0[3*i+j] = dst.omega[3*i+j]
 
-        # save the current orientation
-        for j in range(9):
-            dst.R0[j] = dst.R[j]
+            # save the current orientation
+            for j in range(9):
+                dst.R0[9*i+j] = dst.R[9*i+j]
 
     def initialize(self):
         pass
 
     def py_stage1(self, dst, t, dt):
         dtb2 = dt / 2.
-        for j in range(3):
-            # using velocity at t, move position
-            # to t + dt/2.
-            dst.cm[j] = dst.cm[j] + dtb2 * dst.vc[j]
-            dst.vc[j] = dst.vc[j] + dtb2 * dst.force[j] / dst.total_mass[0]
-        # angular velocity in terms of matrix
-        omega_mat = np.array([[0, -dst.omega[2], dst.omega[1]],
-                              [dst.omega[2], 0, -dst.omega[0]],
-                              [-dst.omega[1], dst.omega[0], 0]])
+        for i in range(dst.nb[0]):
+            i3 = 3 * i
+            i9 = 9 * i
+            for j in range(3):
+                # using velocity at t, move position
+                # to t + dt/2.
+                dst.cm[i3+j] = dst.cm[i3+j] + dtb2 * dst.vc[i3+j]
+                dst.vc[i3+j] = dst.vc[i3+j] + dtb2 * dst.force[i3+j] / dst.total_mass[i]
+            # angular velocity in terms of matrix
+            omega_mat = np.array([[0, -dst.omega[i3+2], dst.omega[i3+1]],
+                                  [dst.omega[i3+2], 0, -dst.omega[i3+0]],
+                                  [-dst.omega[i3+1], dst.omega[i3+0], 0]])
 
-        # Currently the orientation is at time t
-        R = dst.R.reshape(3, 3)
+            # Currently the orientation is at time t
+            R = dst.R[i9:i9+9].reshape(3, 3)
 
-        # Rate of change of orientation is
-        r_dot = np.matmul(omega_mat, R)
-        r_dot = r_dot.ravel()
+            # Rate of change of orientation is
+            r_dot = np.matmul(omega_mat, R)
+            r_dot = r_dot.ravel()
 
-        # update the orientation to next time step
-        dst.R[:] = dst.R0[:] + r_dot[:] * dtb2
+            # update the orientation to next time step
+            dst.R[i9:i9+9] = dst.R0[i9:i9+9] + r_dot * dtb2
 
-        # normalize the orientation using Gram Schmidt process
-        normalize_R_orientation(dst.R)
+            # normalize the orientation using Gram Schmidt process
+            normalize_R_orientation(dst.R[i9:i9+9])
 
-        # update the moment of inertia
-        R = dst.R.reshape(3, 3)
-        R_t = R.transpose()
-        tmp = np.matmul(R, dst.mib.reshape(3, 3))
-        dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
-        # move angular velocity to t + dt/2.
-        # omega_dot is
-        tmp = dst.torque - np.cross(
-            dst.omega, np.matmul(dst.mig.reshape(3, 3), dst.omega))
-        omega_dot = np.matmul(dst.mig.reshape(3, 3), tmp)
-        dst.omega = dst.omega0 + omega_dot * dtb2
+            # update the moment of inertia
+            R = dst.R[i9:i9+9].reshape(3, 3)
+            R_t = R.transpose()
+            tmp = np.matmul(R, dst.mib[i9:i9+9].reshape(3, 3))
+            dst.mig[i9:i9+9] = (np.matmul(tmp, R_t)).ravel()[:]
+            # move angular velocity to t + dt/2.
+            # omega_dot is
+            tmp = dst.torque[i3:i3+3] - np.cross(
+                dst.omega[i3:i3+3], np.matmul(dst.mig[i9:i9+9].reshape(3, 3),
+                                              dst.omega[i3:i3+3]))
+            omega_dot = np.matmul(dst.mig[i9:i9+9].reshape(3, 3), tmp)
+            dst.omega[i3:i3+3] = dst.omega0[i3:i3+3] + omega_dot * dtb2
 
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
-               d_cm, d_vc, d_R, d_omega):
+               d_cm, d_vc, d_R, d_omega, d_body_id):
+        # some variables to update the positions seamlessly
+        bid, i9, i3 = declare('int', 3)
+        bid = d_body_id[d_idx]
+        i9 = 9 * bid
+        i3 = 3 * bid
+
         ###########################
         # Update position vectors #
         ###########################
         # rotate the position of the vector in the body frame to global frame
-        dx = (d_R[0] * d_dx0[d_idx] + d_R[1] * d_dy0[d_idx] +
-              d_R[2] * d_dz0[d_idx])
-        dy = (d_R[3] * d_dx0[d_idx] + d_R[4] * d_dy0[d_idx] +
-              d_R[5] * d_dz0[d_idx])
-        dz = (d_R[6] * d_dx0[d_idx] + d_R[7] * d_dy0[d_idx] +
-              d_R[8] * d_dz0[d_idx])
+        dx = (d_R[i9+0] * d_dx0[d_idx] + d_R[i9+1] * d_dy0[d_idx] +
+              d_R[i9+2] * d_dz0[d_idx])
+        dy = (d_R[i9+3] * d_dx0[d_idx] + d_R[i9+4] * d_dy0[d_idx] +
+              d_R[i9+5] * d_dz0[d_idx])
+        dz = (d_R[i9+6] * d_dx0[d_idx] + d_R[i9+7] * d_dy0[d_idx] +
+              d_R[i9+8] * d_dz0[d_idx])
 
-        d_x[d_idx] = d_cm[0] + dx
-        d_y[d_idx] = d_cm[1] + dy
-        d_z[d_idx] = d_cm[2] + dz
+        d_x[d_idx] = d_cm[i3+0] + dx
+        d_y[d_idx] = d_cm[i3+1] + dy
+        d_z[d_idx] = d_cm[i3+2] + dz
 
         ###########################
         # Update velocity vectors #
@@ -1890,68 +1903,76 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
         # here du, dv, dw are velocities due to angular velocity
         # dV = omega \cross dr
         # where dr = x - cm
-        du = d_omega[1] * dz - d_omega[2] * dy
-        dv = d_omega[2] * dx - d_omega[0] * dz
-        dw = d_omega[0] * dy - d_omega[1] * dx
+        du = d_omega[i3+1] * dz - d_omega[i3+2] * dy
+        dv = d_omega[i3+2] * dx - d_omega[i3+0] * dz
+        dw = d_omega[i3+0] * dy - d_omega[i3+1] * dx
 
-        d_u[d_idx] = d_vc[0] + du
-        d_v[d_idx] = d_vc[1] + dv
-        d_w[d_idx] = d_vc[2] + dw
+        d_u[d_idx] = d_vc[i3+0] + du
+        d_v[d_idx] = d_vc[i3+1] + dv
+        d_w[d_idx] = d_vc[i3+2] + dw
 
     def py_stage2(self, dst, t, dt):
-        for j in range(3):
-            # using velocity at t + dt/2., move position
-            # to t + dt
-            dst.cm[j] = dst.cm0[j] + dt * dst.vc[j]
-            # move linear velocity to t + dt
-            dst.vc[j] = dst.vc0[j] + (dt * dst.force[j] / dst.total_mass[0])
+        for i in range(dst.nb[0]):
+            i3 = 3 * i
+            i9 = 9 * i
+            for j in range(3):
+                # using velocity at t, move position
+                # to t + dt/2.
+                dst.cm[i3+j] = dst.cm0[i3+j] + dt * dst.vc[i3+j]
+                dst.vc[i3+j] = dst.vc0[i3+j] + dt * dst.force[i3+j] / dst.total_mass[i]
+            # angular velocity in terms of matrix
+            omega_mat = np.array([[0, -dst.omega[i3+2], dst.omega[i3+1]],
+                                  [dst.omega[i3+2], 0, -dst.omega[i3+0]],
+                                  [-dst.omega[i3+1], dst.omega[i3+0], 0]])
 
-        # angular velocity in terms of matrix
-        omega_mat = np.array([[0, -dst.omega[2], dst.omega[1]],
-                              [dst.omega[2], 0, -dst.omega[0]],
-                              [-dst.omega[1], dst.omega[0], 0]])
+            # Currently the orientation is at time t
+            R = dst.R[i9:i9+9].reshape(3, 3)
 
-        # Currently the orientation is at time t + dt/2.
-        R = dst.R.reshape(3, 3)
+            # Rate of change of orientation is
+            r_dot = np.matmul(omega_mat, R)
+            r_dot = r_dot.ravel()
 
-        # Rate of change of orientation is
-        r_dot = np.matmul(omega_mat, R)
-        r_dot = r_dot.ravel()
+            # update the orientation to next time step
+            dst.R[i9:i9+9] = dst.R0[i9:i9+9] + r_dot * dt
 
-        # update the orientation to next time step
-        dst.R[:] = dst.R0[:] + r_dot[:] * dt
+            # normalize the orientation using Gram Schmidt process
+            normalize_R_orientation(dst.R[i9:i9+9])
 
-        # normalize the orientation using Gram Schmidt process
-        normalize_R_orientation(dst.R)
-
-        # update the moment of inertia
-        R = dst.R.reshape(3, 3)
-        R_t = R.transpose()
-        tmp = np.matmul(R, dst.mib.reshape(3, 3))
-        dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
-
-        # move angular velocity to t + dt
-        tmp = dst.torque - np.cross(
-            dst.omega, np.matmul(dst.mig.reshape(3, 3), dst.omega))
-        omega_dot = np.matmul(dst.mig.reshape(3, 3), tmp)
-        dst.omega = dst.omega0 + omega_dot * dt
+            # update the moment of inertia
+            R = dst.R[i9:i9+9].reshape(3, 3)
+            R_t = R.transpose()
+            tmp = np.matmul(R, dst.mib[i9:i9+9].reshape(3, 3))
+            dst.mig[i9:i9+9] = (np.matmul(tmp, R_t)).ravel()[:]
+            # move angular velocity to t + dt
+            # omega_dot is
+            tmp = dst.torque[i3:i3+3] - np.cross(
+                dst.omega[i3:i3+3], np.matmul(dst.mig[i9:i9+9].reshape(3, 3),
+                                              dst.omega[i3:i3+3]))
+            omega_dot = np.matmul(dst.mig[i9:i9+9].reshape(3, 3), tmp)
+            dst.omega[i3:i3+3] = dst.omega0[i3:i3+3] + omega_dot * dt
 
     def stage2(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
-               d_cm, d_vc, d_R, d_omega):
+               d_cm, d_vc, d_R, d_omega, d_body_id):
+        # some variables to update the positions seamlessly
+        bid, i9, i3 = declare('int', 3)
+        bid = d_body_id[d_idx]
+        i9 = 9 * bid
+        i3 = 3 * bid
+
         ###########################
         # Update position vectors #
         ###########################
         # rotate the position of the vector in the body frame to global frame
-        dx = (d_R[0] * d_dx0[d_idx] + d_R[1] * d_dy0[d_idx] +
-              d_R[2] * d_dz0[d_idx])
-        dy = (d_R[3] * d_dx0[d_idx] + d_R[4] * d_dy0[d_idx] +
-              d_R[5] * d_dz0[d_idx])
-        dz = (d_R[6] * d_dx0[d_idx] + d_R[7] * d_dy0[d_idx] +
-              d_R[8] * d_dz0[d_idx])
+        dx = (d_R[i9+0] * d_dx0[d_idx] + d_R[i9+1] * d_dy0[d_idx] +
+              d_R[i9+2] * d_dz0[d_idx])
+        dy = (d_R[i9+3] * d_dx0[d_idx] + d_R[i9+4] * d_dy0[d_idx] +
+              d_R[i9+5] * d_dz0[d_idx])
+        dz = (d_R[i9+6] * d_dx0[d_idx] + d_R[i9+7] * d_dy0[d_idx] +
+              d_R[i9+8] * d_dz0[d_idx])
 
-        d_x[d_idx] = d_cm[0] + dx
-        d_y[d_idx] = d_cm[1] + dy
-        d_z[d_idx] = d_cm[2] + dz
+        d_x[d_idx] = d_cm[i3+0] + dx
+        d_y[d_idx] = d_cm[i3+1] + dy
+        d_z[d_idx] = d_cm[i3+2] + dz
 
         ###########################
         # Update velocity vectors #
@@ -1959,13 +1980,13 @@ class RK2StepRigidBodyRotationMatrices(IntegratorStep):
         # here du, dv, dw are velocities due to angular velocity
         # dV = omega \cross dr
         # where dr = x - cm
-        du = d_omega[1] * dz - d_omega[2] * dy
-        dv = d_omega[2] * dx - d_omega[0] * dz
-        dw = d_omega[0] * dy - d_omega[1] * dx
+        du = d_omega[i3+1] * dz - d_omega[i3+2] * dy
+        dv = d_omega[i3+2] * dx - d_omega[i3+0] * dz
+        dw = d_omega[i3+0] * dy - d_omega[i3+1] * dx
 
-        d_u[d_idx] = d_vc[0] + du
-        d_v[d_idx] = d_vc[1] + dv
-        d_w[d_idx] = d_vc[2] + dw
+        d_u[d_idx] = d_vc[i3+0] + du
+        d_v[d_idx] = d_vc[i3+1] + dv
+        d_w[d_idx] = d_vc[i3+2] + dw
 
 
 class RigidBodyRotationMatricesScheme(Scheme):
@@ -2049,7 +2070,10 @@ class SumUpExternalForces(Equation):
         y = declare('object')
         z = declare('object')
         cm = declare('object')
+        body_id = declare('object')
         j = declare('int')
+        i = declare('int')
+        i3 = declare('int')
 
         frc = dst.force
         trq = dst.torque
@@ -2060,26 +2084,29 @@ class SumUpExternalForces(Equation):
         y = dst.y
         z = dst.z
         cm = dst.cm
+        body_id = dst.body_id
 
         frc[:] = 0
         trq[:] = 0
 
         for j in range(len(x)):
-            frc[0] += fx[j]
-            frc[1] += fy[j]
-            frc[2] += fz[j]
+            i = body_id[j]
+            i3 = 3 * i
+            frc[i3] += fx[j]
+            frc[i3+1] += fy[j]
+            frc[i3+2] += fz[j]
 
             # torque due to force on particle i
             # (r_i - com) \cross f_i
-            dx = x[j] - cm[0]
-            dy = y[j] - cm[1]
-            dz = z[j] - cm[2]
+            dx = x[j] - cm[i3]
+            dy = y[j] - cm[i3+1]
+            dz = z[j] - cm[i3+2]
 
             # torque due to force on particle i
             # dri \cross fi
-            trq[0] += (dy * fz[j] - dz * fy[j])
-            trq[1] += (dz * fx[j] - dx * fz[j])
-            trq[2] += (dx * fy[j] - dy * fx[j])
+            trq[i3] += (dy * fz[j] - dz * fy[j])
+            trq[i3+1] += (dz * fx[j] - dx * fz[j])
+            trq[i3+2] += (dx * fy[j] - dy * fx[j])
 
 
 def get_particle_array_rigid_body_quaternion(constants=None, **props):

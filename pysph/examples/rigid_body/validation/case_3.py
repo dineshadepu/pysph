@@ -14,7 +14,8 @@ from pysph.sph.scheme import SchemeChooser
 from pysph.solver.application import Application
 from pysph.sph.rigid_body import (
     RigidBodySimpleScheme, RigidBodyRotationMatricesScheme,
-    get_particle_array_rigid_body_rotation_matrix)
+    RigidBodyQuaternionScheme, get_particle_array_rigid_body_rotation_matrix,
+    get_particle_array_rigid_body_quaternion)
 from pysph.examples.solid_mech.impact import add_properties
 
 
@@ -77,6 +78,21 @@ class Case3(Application):
             add_properties(body2, 'tang_velocity_z', 'tang_disp_y',
                            'tang_velocity_x', 'tang_disp_x', 'tang_velocity_y',
                            'tang_disp_z')
+
+        elif self.options.scheme == 'rbqs':
+            body1 = get_particle_array_rigid_body_quaternion(
+                name='body1', x=body1.x, y=body1.y, h=body1.h, m=body1.m,
+                rad_s=body1.rad_s)
+            body1.omega[2] = -3.
+            add_properties(body1, 'tang_velocity_z', 'tang_disp_y',
+                           'tang_velocity_x', 'tang_disp_x', 'tang_velocity_y',
+                           'tang_disp_z')
+            body2 = get_particle_array_rigid_body_quaternion(
+                name='body2', x=body2.x, y=body2.y, h=body2.h, m=body2.m,
+                rad_s=body2.rad_s)
+            add_properties(body2, 'tang_velocity_z', 'tang_disp_y',
+                           'tang_velocity_x', 'tang_disp_x', 'tang_velocity_y',
+                           'tang_disp_z')
         return [body1, body2]
 
     def create_scheme(self):
@@ -86,7 +102,10 @@ class Case3(Application):
         rbrms = RigidBodyRotationMatricesScheme(
             bodies=['body1', 'body2'], solids=None, dim=self.dim,
             rho0=self.rho0, kn=self.kn, mu=self.mu, en=self.en)
-        s = SchemeChooser(default='rbss', rbss=rbss, rbrms=rbrms)
+        rbqs = RigidBodyQuaternionScheme(bodies=['body1', 'body2'], solids=None,
+                                         dim=3, rho0=self.rho0, kn=self.kn,
+                                         mu=self.mu, en=self.en, gz=-9.81)
+        s = SchemeChooser(default='rbss', rbss=rbss, rbrms=rbrms, rbqs=rbqs)
         return s
 
     def configure_scheme(self):
@@ -97,33 +116,6 @@ class Case3(Application):
         scheme.configure()
         scheme.configure_solver(kernel=kernel, integrator_cls=EPECIntegrator,
                                 dt=dt, tf=tf)
-
-    # def post_process(self):
-    #     if len(self.output_files) == 0:
-    #         return
-
-    #     from pysph.solver.utils import iter_output
-
-    #     files = self.output_files
-    #     t = []
-    #     tot_ene_b1, ang_mom_b1, lin_mom_b1 = [], [], []
-    #     tot_ene_b2, ang_mom_b2, lin_mom_b2 = [], [], []
-    #     for sd, array in iter_output(files, 'body1', 'body2'):
-    #         _t = sd['t']
-    #         t.append(_t)
-
-    #     import matplotlib
-    #     import os
-    #     matplotlib.use('Agg')
-
-    #     from matplotlib import pyplot as plt
-    #     plt.clf()
-    #     plt.plot(t, amplitude)
-    #     plt.xlabel('t')
-    #     plt.ylabel('Amplitude')
-    #     plt.legend()
-    #     fig = os.path.join(self.output_dir, "amplitude.png")
-    #     plt.savefig(fig, dpi=300)
 
 
 if __name__ == '__main__':

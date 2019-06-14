@@ -23,10 +23,10 @@ def set_mi_in_body_frame(pa):
     And set moment of inertia inverse for further computations.
     This method assumes the center of mass is already computed."""
     # no of bodies
-    no = pa.body_id + 1
+    nb = pa.nb[0]
     # loop over all the bodies
-    for i in range(no):
-        fltr = np.where(pa.body_id == i)
+    for i in range(nb):
+        fltr = np.where(pa.body_id == i)[0]
         cm_i = pa.cm[3*i:3*i+3]
 
         I = np.zeros(9)
@@ -131,10 +131,10 @@ def set_principal_mi_in_body_frame(pa):
 
 def set_body_frame_position_vectors(pa):
     """Save the position vectors w.r.t body frame"""
-    no = pa.body_id + 1
+    nb = pa.nb[0]
     # loop over all the bodies
-    for i in range(no):
-        fltr = np.where(pa.body_id == i)
+    for i in range(nb):
+        fltr = np.where(pa.body_id == i)[0]
         cm_i = pa.cm[3*i:3*i+3]
         for j in fltr:
             pa.dx0[j] = pa.x[j] - cm_i[0]

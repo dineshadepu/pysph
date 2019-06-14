@@ -106,33 +106,6 @@ class Case2b(Application):
         b.plot.actor.property.opacity = 0.1
         ''')
 
-    def post_process(self):
-        if len(self.output_files) == 0:
-            return
-
-        from pysph.solver.utils import iter_output
-
-        files = self.output_files
-        t = []
-        tot_ene_b1, ang_mom_b1, lin_mom_b1 = [], [], []
-        tot_ene_b2, ang_mom_b2, lin_mom_b2 = [], [], []
-        for sd, array in iter_output(files, 'body1', 'body2'):
-            _t = sd['t']
-            t.append(_t)
-
-        import matplotlib
-        import os
-        matplotlib.use('Agg')
-
-        from matplotlib import pyplot as plt
-        plt.clf()
-        plt.plot(t, amplitude)
-        plt.xlabel('t')
-        plt.ylabel('Amplitude')
-        plt.legend()
-        fig = os.path.join(self.output_dir, "amplitude.png")
-        plt.savefig(fig, dpi=300)
-
 
 if __name__ == '__main__':
     app = Case2b()
