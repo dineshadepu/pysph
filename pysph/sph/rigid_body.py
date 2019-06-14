@@ -1490,7 +1490,7 @@ def get_particle_array_rigid_body_dem(constants=None, **props):
         'cm': numpy.zeros(3 * nb, dtype=float),
 
         # The mi are also used to temporarily reduce mass (1), center of
-        # mass (3) and the interia components (6), total force (3), total
+        # mass (3) and the inertia components (6), total force (3), total
         # torque (3).
         'mi': numpy.zeros(16 * nb, dtype=float),
         'force': numpy.zeros(3 * nb, dtype=float),
@@ -1740,36 +1740,44 @@ def get_particle_array_rigid_body_rotation_matrix(constants=None, **props):
         'nz'
     ]
 
-    consts = {
-        'total_mass': 0.,
-        'cm': numpy.zeros(3, dtype=float),
-        'cm0': numpy.zeros(3, dtype=float),
-        'R': [1., 0., 0., 0., 1., 0., 0., 0., 1.],
-        'R0': [1., 0., 0., 0., 1., 0., 0., 0., 1.],
-        # moment of inertia inverse in body frame
-        'mib': numpy.zeros(9, dtype=float),
-        # moment of inertia inverse in global frame
-        'mig': numpy.zeros(9, dtype=float),
-        # total force at the center of mass
-        'force': numpy.zeros(3, dtype=float),
-        # torque about the center of mass
-        'torque': numpy.zeros(3, dtype=float),
-        # velocity, acceleration of CM.
-        'vc': numpy.zeros(3, dtype=float),
-        'vc0': numpy.zeros(3, dtype=float),
-        # angular momentum
-        'L': numpy.zeros(3, dtype=float),
-        'L0': numpy.zeros(3, dtype=float),
-        # angular velocity in global frame
-        'omega': numpy.zeros(3, dtype=float),
-        'omega0': numpy.zeros(3, dtype=float),
-    }
+    body_id = props.pop('body_id', None)
+    nb = 1 if body_id is None else numpy.max(body_id) + 1
 
+    dem_id = props.pop('dem_id', None)
+
+    consts = {
+        'total_mass': numpy.zeros(nb, dtype=float),
+        'num_body': numpy.asarray(nb, dtype=int),
+        'cm': numpy.zeros(3*nb, dtype=float),
+        'cm0': numpy.zeros(3*nb, dtype=float),
+        'R': [1., 0., 0., 0., 1., 0., 0., 0., 1.] * nb,
+        'R0': [1., 0., 0., 0., 1., 0., 0., 0., 1.] * nb,
+        # moment of inertia inverse in body frame
+        'mib': numpy.zeros(9*nb, dtype=float),
+        # moment of inertia inverse in global frame
+        'mig': numpy.zeros(9*nb, dtype=float),
+        # total force at the center of mass
+        'force': numpy.zeros(3*nb, dtype=float),
+        # torque about the center of mass
+        'torque': numpy.zeros(3*nb, dtype=float),
+        # velocity, acceleration of CM.
+        'vc': numpy.zeros(3*nb, dtype=float),
+        'vc0': numpy.zeros(3*nb, dtype=float),
+        # angular momentum
+        'L': numpy.zeros(3*nb, dtype=float),
+        'L0': numpy.zeros(3*nb, dtype=float),
+        # angular velocity in global frame
+        'omega': numpy.zeros(3*nb, dtype=float),
+        'omega0': numpy.zeros(3*nb, dtype=float),
+    }
     if constants:
         consts.update(constants)
 
     pa = get_particle_array(constants=consts, additional_props=extra_props,
                             **props)
+    pa.add_property('body_id', type='int', data=body_id)
+    pa.add_property('dem_id', type='int', data=dem_id)
+
     setup_rotation_matrix_rigid_body(pa)
 
     pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz', 'm'])
