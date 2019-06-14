@@ -2194,14 +2194,13 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
             dst.cm[j] = dst.cm[j] + dtb2 * dst.vc[j]
             dst.vc[j] = dst.vc[j] + dtb2 * dst.force[j] / dst.total_mass[0]
 
-        # delta quaternion (change in quaternion)
+        # change in quaternion
         delta_quat = np.array([0., 0., 0., 0.])
         # angular velocity magnitude
         omega_magn = sqrt(dst.omega[0]**2 + dst.omega[1]**2 + dst.omega[2]**2)
         axis_rot = np.array([0., 0., 0.])
-        if omega_magn > 0:
+        if omega_magn > 1e-12:
             axis_rot = dst.omega / omega_magn
-        print(omega_magn * dtb2 * 0.5)
         delta_quat[0] = cos(omega_magn * dtb2 * 0.5)
         delta_quat[1] = axis_rot[0] * sin(omega_magn * dtb2 * 0.5)
         delta_quat[2] = axis_rot[1] * sin(omega_magn * dtb2 * 0.5)
@@ -2268,7 +2267,7 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
         # angular velocity magnitude
         omega_magn = sqrt(dst.omega[0]**2 + dst.omega[1]**2 + dst.omega[2]**2)
         axis_rot = np.array([0., 0., 0.])
-        if omega_magn > 0:
+        if omega_magn > 1e-12:
             axis_rot = dst.omega / omega_magn
         delta_quat[0] = cos(omega_magn * dt * 0.5)
         delta_quat[1] = axis_rot[0] * sin(omega_magn * dt * 0.5)
@@ -2280,7 +2279,7 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
         dst.q = res
 
         # normalize the orientation
-        # normalize_q_orientation(dst.q)
+        normalize_q_orientation(dst.q)
 
         # update the moment of inertia
         quaternion_to_matrix(dst.q, dst.R)
