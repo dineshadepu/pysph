@@ -2262,6 +2262,8 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
         # update the moment of inertia
         quaternion_to_matrix(dst.q, dst.R)
         R = dst.R.reshape(3, 3)
+        R = R.T
+        dst.R[:] = R.ravel()
         R_t = R.T
         tmp = np.matmul(R, dst.mib.reshape(3, 3))
         dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
@@ -2330,6 +2332,8 @@ class RK2StepRigidBodyQuaternions(IntegratorStep):
         # update the moment of inertia
         quaternion_to_matrix(dst.q, dst.R)
         R = dst.R.reshape(3, 3)
+        R = R.T
+        dst.R[:] = R.ravel()
         R_t = R.T
         tmp = np.matmul(R, dst.mib.reshape(3, 3))
         dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
