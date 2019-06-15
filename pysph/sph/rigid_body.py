@@ -2535,8 +2535,8 @@ class RK2StepRigidBodyRotationMatricesOptimized(IntegratorStep):
             r_dot = r_dot.ravel()
 
             # convert the angular velocity and torque to body frame
-            ob = np.matmul(R.transpose(), dst.omega)
-            tb = np.matmul(R.transpose(), dst.torque)
+            ob = np.matmul(R.transpose(), dst.omega[i3:i3+3])
+            tb = np.matmul(R.transpose(), dst.torque[i3:i3+3])
             mibp_i = dst.mibp[i3:i3+3]
 
             ob_dot = np.array([0., 0., 0.])
@@ -2549,7 +2549,7 @@ class RK2StepRigidBodyRotationMatricesOptimized(IntegratorStep):
 
             # convert the rate of change of angular velocity from
             # body frame to global frame
-            og_dot = np.matmul(R, dst.torque)
+            og_dot = np.matmul(R, ob_dot)
 
             # update the orientation to next time step
             dst.R[i9:i9+9] = dst.R0[i9:i9+9] + r_dot * dtb2
@@ -2633,7 +2633,7 @@ class RK2StepRigidBodyRotationMatricesOptimized(IntegratorStep):
 
             # convert the rate of change of angular velocity from
             # body frame to global frame
-            og_dot = np.matmul(R, dst.torque)
+            og_dot = np.matmul(R, ob_dot)
 
             # update the orientation to next time step
             dst.R[i9:i9+9] = dst.R0[i9:i9+9] + r_dot * dt
