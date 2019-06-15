@@ -98,14 +98,57 @@ def set_mi_in_body_frame_optimized(pa):
         I[6] = I[2]
         I[7] = I[5]
         # find the eigen vectors and eigen values of the moi
-        vals, vecs = np.linalg.eigh(I.reshape(3, 3))
-        # and set the eigen values as the principal moi values
-        pa.mbp[3 * i:3 * i + 3] = vals
-        inv = 1. / vals
-        pa.mib[9 * i:9 * i + 9] = np.diag(inv).ravel()
-        # and similarly set the corresponding body frame
-        # which will be the eigen vectors
-        pa.R[9 * i:9 * i + 9] = vecs.ravel()
+        vals, R = np.linalg.eigh(I.reshape(3, 3))
+        # find the determinant of R
+        determinant = np.linalg.det(R)
+        if determinant == -1.:
+            R[:, 0] = -R[:, 0]
+
+        # recompute the moment of inertia about the new coordinate frame
+        # if flipping of one of the axis due the determinant value
+        R = R.ravel()
+
+        if determinant == -1.:
+            I = np.zeros(9)
+            for j in fltr:
+                dx = pa.x[j] - cm_i[0]
+                dy = pa.y[j] - cm_i[1]
+                dz = pa.z[j] - cm_i[2]
+
+                dx0 = (R[0] * dx + R[3] * dy + R[6] * dz)
+                dy0 = (R[1] * dx + R[4] * dy + R[7] * dz)
+                dz0 = (R[2] * dx + R[5] * dy + R[8] * dz)
+
+                # Ixx
+                I[0] += pa.m[j] * (
+                    (dy0)**2. + (dz0)**2.)
+
+                # Iyy
+                I[4] += pa.m[j] * (
+                    (dx0)**2. + (dz0)**2.)
+
+                # Izz
+                I[8] += pa.m[j] * (
+                    (dx0)**2. + (dy0)**2.)
+
+                # Ixy
+                I[1] -= pa.m[j] * (dx0) * (dy0)
+
+                # Ixz
+                I[2] -= pa.m[j] * (dx0) * (dz0)
+
+                # Iyz
+                I[5] -= pa.m[j] * (dy0) * (dz0)
+
+            I[3] = I[1]
+            I[6] = I[2]
+            I[7] = I[5]
+
+            # set the inverse inertia values
+            vals = np.array([I[0], I[4], I[8]])
+
+        pa.mibp[3 * i:3 * i + 3] = 1. / vals
+        pa.R[9 * i:9 * i + 9] = R
 
 
 def get_mi_in_global_frame(pa):
