@@ -20,9 +20,10 @@ from pysph.examples.solid_mech.impact import add_properties
 from pysph.tools.geometry import get_2d_tank
 
 
-def create_four_bodies():
-    nx, ny = 10, 10
-    x, y = np.mgrid[0:1:nx * 1j, 0:1:ny * 1j]
+def create_four_bodies(dx):
+    nx = 10
+    dx = 1.0 / (nx - 1)
+    x, y = np.mgrid[0:1:dx, 0:1:dx]
     x = x.ravel()
     y = y.ravel()
     x = x - 5.
@@ -47,11 +48,11 @@ class Case2c(Application):
     def create_particles(self):
         nx = 10
         dx = 1.0 / (nx - 1)
-        x4, y4, b4 = create_four_bodies()
+        x4, y4, b4 = create_four_bodies(dx)
         m = np.ones_like(x4) * dx * dx * self.rho0
         h = np.ones_like(x4) * self.hdx * dx
         # radius of each sphere constituting in cube
-        rad_s = np.ones_like(x4) * dx
+        rad_s = np.ones_like(x4) * dx / 2.
         body = get_particle_array_rigid_body(name='body', x=x4, y=y4, h=h, m=m,
                                              rad_s=rad_s, body_id=b4)
 
@@ -62,7 +63,7 @@ class Case2c(Application):
         h = np.ones_like(x) * self.hdx * dx
 
         # radius of each sphere constituting in cube
-        rad_s = np.ones_like(x) * dx
+        rad_s = np.ones_like(x) * dx / 2.
         tank = get_particle_array_rigid_body(name='tank', x=x, y=y, h=h, m=m,
                                              rad_s=rad_s)
         tank.total_mass[0] = np.sum(m)

@@ -13,8 +13,10 @@ from pysph.sph.scheme import SchemeChooser
 from pysph.sph.rigid_body import (
     RigidBodySimpleScheme, RigidBodyRotationMatricesScheme,
     RigidBodyQuaternionScheme,
+    RigidBodyRotationMatricesOptimizedScheme,
     get_particle_array_rigid_body_rotation_matrix,
-    get_particle_array_rigid_body_quaternion)
+    get_particle_array_rigid_body_quaternion,
+    get_particle_array_rigid_body_rotation_matrix_optimized)
 from pysph.examples.solid_mech.impact import add_properties
 
 
@@ -40,7 +42,11 @@ class Case0(Application):
         rbqs = RigidBodyQuaternionScheme(
             bodies=['body'], solids=None, dim=3, rho0=self.rho0, kn=self.kn,
             mu=self.mu, en=self.en)
-        s = SchemeChooser(default='rbss', rbss=rbss, rbrms=rbrms, rbqs=rbqs)
+        rbrmos = RigidBodyRotationMatricesOptimizedScheme(
+            bodies=['body'], solids=None, dim=3, rho0=self.rho0, kn=self.kn,
+            mu=self.mu, en=self.en)
+        s = SchemeChooser(default='rbss', rbss=rbss, rbrms=rbrms, rbqs=rbqs,
+                          rbrmos=rbrmos)
         return s
 
     def configure_scheme(self):
@@ -68,6 +74,13 @@ class Case0(Application):
 
         if self.options.scheme == 'rbrms':
             body = get_particle_array_rigid_body_rotation_matrix(
+                name='body', x=x, y=y, z=z, h=h, m=m, rad_s=rad_s)
+            add_properties(body, 'tang_velocity_z', 'tang_disp_y',
+                           'tang_velocity_x', 'tang_disp_x', 'tang_velocity_y',
+                           'tang_disp_z')
+
+        elif self.options.scheme == 'rbrmos':
+            body = get_particle_array_rigid_body_rotation_matrix_optimized(
                 name='body', x=x, y=y, z=z, h=h, m=m, rad_s=rad_s)
             add_properties(body, 'tang_velocity_z', 'tang_disp_y',
                            'tang_velocity_x', 'tang_disp_x', 'tang_velocity_y',
