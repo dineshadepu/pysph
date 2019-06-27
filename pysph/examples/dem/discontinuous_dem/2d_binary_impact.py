@@ -15,10 +15,16 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 from pysph.solver.application import Application
 from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
+from pysph.sph.integrator import EPECIntegrator
 from pysph.dem.discontinuous_dem.dem_linear import (
-    get_particle_array_dem_linear, LinearDEMScheme, UpdateTangentialContacts)
+    get_particle_array_dem_linear, LinearDEMScheme,
+    UpdateTangentialContactsNoRotation, LinearPPFDEMStage1, LinearPPFDEMStage2,
+    RK2StepLinearDEM, LinearDEMNoRotationScheme, LinearPPFDEMNoRotationStage1,
+    LinearPPFDEMNoRotationStage2)
+from pysph.dem.discontinuous_dem.dem_linear import (BodyForce)
 from pysph.sph.scheme import SchemeChooser
 from pysph.sph.equation import Group
+from pysph.sph.equation import Group, MultiStageEquations
 
 
 class BinaryImpact2d(Application):
@@ -27,11 +33,14 @@ class BinaryImpact2d(Application):
         super(BinaryImpact2d, self).__init__()
 
     def initialize(self):
+        self.tf = 0.05
+        # self.tf = 0.01
         self.dt = 1e-4
         self.dim = 2
-        self.en = 0.8
+        self.en = 1.
+        # self.en = 0.8
         self.mu = 0.5
-        self.kn = 1e4
+        self.kn = 1e6
         self.radius = 0.05
         self.diameter = 2. * self.radius
         self.gx = 0.
@@ -40,9 +49,11 @@ class BinaryImpact2d(Application):
         # self.tf = 0.000012
 
     def create_particles(self):
+        scale = 0.05
+        # scale = 0.001
         rad_s = np.array([self.radius, self.radius])
         dia_s = 2. * np.array([self.radius, self.radius])
-        x = np.array([0., 3. * self.radius])
+        x = np.array([-self.radius, self.radius + scale])
         y = np.array([0., 0.])
         u = np.array([1., -1])
         rho = np.array([2700., 2700.])
@@ -53,16 +64,59 @@ class BinaryImpact2d(Application):
         h = 1.2 * rad_s
         spheres = get_particle_array_dem_linear(
             x=x, y=y, u=u, h=h, m=m, rho=rho, rad_s=rad_s, dem_id=0,
-            m_inv=m_inv, I_inv=I_inv, name="spheres")
+            m_inverse=m_inv, I_inverse=I_inv, name="spheres")
 
         return [spheres]
+
+    # def create_equations(self):
+    #     stage1 = [
+    #         Group(equations=[
+    #             BodyForce(dest='spheres', sources=None, gx=0.0, gy=0.0,
+    #                       gz=0.0),
+    #             LinearPPFDEMNoRotationStage1(dest='spheres', sources=[
+    #                 'spheres'
+    #             ], kn=self.kn, mu=0.5, en=1.0)
+    #         ]),
+    #     ]
+    #     return stage1
+    #     stage2 = [
+    #         Group(equations=[
+    #             BodyForce(dest='spheres', sources=None, gx=0.0, gy=0.0,
+    #                       gz=0.0),
+    #             LinearPPFDEMNoRotationStage2(dest='spheres', sources=[
+    #                 'spheres'
+    #             ], kn=self.kn, mu=0.5, en=1.0)
+    #         ]),
+    #     ]
+    #     return MultiStageEquations([stage1, stage2])
+
+    # def create_solver(self):
+    #     kernel = CubicSpline(dim=self.dim)
+
+    #     # integrator = EPECIntegratorMultiStage(spheres=RK2StepLinearDEM())
+    #     integrator = EPECIntegrator(spheres=RK2StepLinearDEM())
+
+    #     dt = self.dt
+    #     tf = self.tf
+    #     solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
+    #                     dt=dt, tf=tf, pfreq=10)
+    #     solver.set_disable_output(True)
+    #     return solver
 
     def create_scheme(self):
         ldems = LinearDEMScheme(dem_bodies=['spheres'], rigid_bodies=None,
                                 solids=None, dim=self.dim, kn=self.kn,
                                 mu=self.mu, en=self.en, gx=self.gx, gy=self.gy,
                                 gz=self.gz)
-        s = SchemeChooser(default='ldems', ldems=ldems)
+        ldemnrs = LinearDEMNoRotationScheme(
+            dem_bodies=['spheres'], rigid_bodies=None, solids=None,
+            dim=self.dim, kn=self.kn, mu=self.mu, en=self.en, gx=self.gx,
+            gy=self.gy, gz=self.gz)
+        s = SchemeChooser(
+            default='ldemnrs',
+            ldemnrs=ldemnrs,
+            ldems=ldems,
+        )
         return s
 
     def configure_scheme(self):
@@ -73,7 +127,7 @@ class BinaryImpact2d(Application):
         scheme.configure()
         scheme.configure_solver(kernel=kernel,
                                 integrator_cls=EPECIntegratorMultiStage, dt=dt,
-                                tf=tf)
+                                tf=tf, pfreq=10)
 
     def _make_accel_eval(self, equations, pa_arrays):
         from pysph.tools.sph_evaluator import SPHEvaluator
@@ -87,7 +141,8 @@ class BinaryImpact2d(Application):
         dt = solver.dt
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContacts(dest='spheres', sources=["spheres"])
+                UpdateTangentialContactsNoRotation(dest='spheres',
+                                                   sources=["spheres"])
             ])
         ]
         arrays = self.particles
@@ -108,4 +163,3 @@ class BinaryImpact2d(Application):
 if __name__ == '__main__':
     app = BinaryImpact2d(theta=0.)
     app.run()
-    # app.post_process()
