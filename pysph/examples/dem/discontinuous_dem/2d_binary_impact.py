@@ -33,12 +33,11 @@ class BinaryImpact2d(Application):
         super(BinaryImpact2d, self).__init__()
 
     def initialize(self):
-        self.tf = 0.05
-        # self.tf = 0.01
+        self.tf = 0.02
         self.dt = 1e-4
         self.dim = 2
-        self.en = 1.
-        # self.en = 0.8
+        # self.en = 1.
+        self.en = 0.5
         self.mu = 0.5
         self.kn = 1e6
         self.radius = 0.05
@@ -46,11 +45,11 @@ class BinaryImpact2d(Application):
         self.gx = 0.
         self.gy = 0.
         self.gz = 0.
-        # self.tf = 0.000012
+        self.seval = None
 
     def create_particles(self):
-        scale = 0.05
-        # scale = 0.001
+        # scale = 0.0
+        scale = 0.01
         rad_s = np.array([self.radius, self.radius])
         dia_s = 2. * np.array([self.radius, self.radius])
         x = np.array([-self.radius, self.radius + scale])
@@ -99,7 +98,7 @@ class BinaryImpact2d(Application):
     #     dt = self.dt
     #     tf = self.tf
     #     solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
-    #                     dt=dt, tf=tf, pfreq=10)
+    #                     dt=dt, tf=tf, pfreq=5)
     #     solver.set_disable_output(True)
     #     return solver
 
@@ -122,19 +121,22 @@ class BinaryImpact2d(Application):
     def configure_scheme(self):
         scheme = self.scheme
         kernel = CubicSpline(dim=self.dim)
-        tf = 0.1
         dt = self.dt
         scheme.configure()
         scheme.configure_solver(kernel=kernel,
                                 integrator_cls=EPECIntegratorMultiStage, dt=dt,
-                                tf=tf, pfreq=10)
+                                tf=self.tf, pfreq=5)
 
     def _make_accel_eval(self, equations, pa_arrays):
         from pysph.tools.sph_evaluator import SPHEvaluator
-        kernel = CubicSpline(dim=self.dim)
-        seval = SPHEvaluator(arrays=pa_arrays, equations=equations,
-                             dim=self.dim, kernel=kernel)
-        return seval
+        if self.seval is None:
+            kernel = CubicSpline(dim=self.dim)
+            seval = SPHEvaluator(arrays=pa_arrays, equations=equations,
+                                 dim=self.dim, kernel=kernel)
+            self.seval = seval
+            return self.seval
+        else:
+            return self.seval
 
     def post_step(self, solver):
         t = solver.t

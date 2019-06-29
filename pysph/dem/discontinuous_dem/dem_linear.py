@@ -54,8 +54,7 @@ def get_particle_array_dem_linear(constants=None, **props):
     pa.set_output_arrays([
         'x', 'y', 'z', 'u', 'v', 'w', 'wx', 'wy', 'wz', 'm', 'p', 'pid', 'tag',
         'gid', 'fx', 'fy', 'fz', 'torx', 'tory', 'torz', 'I_inverse',
-        'm_inverse'
-    ])
+        'm_inverse'])
 
     return pa
 

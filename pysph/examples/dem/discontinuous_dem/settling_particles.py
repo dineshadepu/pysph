@@ -21,68 +21,62 @@ from pysph.dem.discontinuous_dem.dem_linear import (
 from pysph.sph.scheme import SchemeChooser
 from pysph.sph.equation import Group
 from pysph.base.utils import get_particle_array_rigid_body
+from pysph.base.utils import get_particle_array
+from pysph.tools.geometry import get_2d_tank, get_2d_block
 
 
-def create_circle(points=100, radius=50e-3):
-    theta = np.linspace(0., 2. * np.pi, points)
-    x = radius * np.cos(theta)
-    y = radius * np.sin(theta)
-    return x, y
-
-
-class RotatingDrum(Application):
+class SettlingParticles(Application):
     def __init__(self, theta=0.):
         self.theta = theta
-        super(RotatingDrum, self).__init__()
+        super(SettlingParticles, self).__init__()
 
     def initialize(self):
+        self.dx = 0.05
         self.drum_radius = 50e-3
-        self.dt = 5e-5
-        self.tf = 1.
+        self.dt = 1e-5
+        self.tf = 4
         self.dim = 2
-        self.en = 0.8
-        self.kn = 1e4
+        self.en = 0.5
+        self.kn = 1e5
         # friction coefficient
         self.mu = 0.5
         self.gy = -9.81
         self.seval = None
 
     def create_particles(self):
-        # create a rotating drum
-        x_d, y_d = create_circle(50, self.drum_radius)
-        self.drum_spacing = (
-            (x_d[2] - x_d[1])**2. + (y_d[2] - y_d[1])**2.)**0.5
-        drum = get_particle_array_rigid_body(x=x_d, y=y_d, m=1,
-                                             rad_s=self.drum_spacing / 2.,
-                                             name="drum", wx=0., wy=0., wz=0.)
+        # create a tank
+        xt, yt = get_2d_tank(self.dx/2., [0., 0.], 1., 1.,  2)
+        rad_s = np.ones_like(xt) * self.dx / 4.
+        rho = 2500
+        m = rho * np.pi * rad_s**2.
+        tank = get_particle_array(x=xt, y=yt, m=m,
+                                  rad_s=rad_s,
+                                  name="tank", wx=0.,
+                                  wy=0., wz=0.)
 
-        drum.add_property('dem_id', type='int')
-        drum.dem_id[:] = 0
+        tank.add_property('dem_id', type='int')
+        tank.dem_id[:] = 0
         # drum.omega[2] = 30.
 
         # create a bunch of particles inside the drum
-        x, y = np.mgrid[-30e-3:30e-3:self.drum_spacing, -30e-3:30e-3:self.
-                        drum_spacing]
-        x = x.ravel()
-        y = y.ravel()
-        rad_s = np.ones_like(x) * self.drum_spacing / 2.
+        xp, yp = get_2d_block(self.dx, 0.3, 0.3, [0., 0.2])
+        rad_s = np.ones_like(xp) * self.dx / 2.
         rho = 2500
         m = rho * np.pi * rad_s**2.
-        inertia = m * 2. * rad_s**2. / 10.
+        inertia = m * 2. * rad_s / 10.
         m_inverse = 1. / m
         I_inverse = 1. / inertia
         sand = get_particle_array_dem_linear(
-            x=x, y=y, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
-            rad_s=self.drum_spacing / 2., dem_id=1,
-            h=1.2 * self.drum_spacing / 2., name="sand")
+            x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
+            rad_s=rad_s, dem_id=1, h=1.2*self.dx/2., name="sand")
 
-        return [drum, sand]
+        return [tank, sand]
 
     def create_scheme(self):
-        ldems = LinearDEMNoRotationScheme(
-            dem_bodies=['sand'], rigid_bodies=['drum'], solids=None,
+        ldemnrs = LinearDEMNoRotationScheme(
+            dem_bodies=['sand'], rigid_bodies=None, solids=['tank'],
             dim=self.dim, kn=self.kn, mu=self.mu, en=self.en, gy=self.gy)
-        s = SchemeChooser(default='ldems', ldems=ldems)
+        s = SchemeChooser(default='ldemnrs', ldemnrs=ldemnrs)
         return s
 
     def configure_scheme(self):
@@ -112,7 +106,7 @@ class RotatingDrum(Application):
         eqs1 = [
             Group(equations=[
                 UpdateTangentialContactsNoRotation(dest='sand',
-                                                   sources=['sand', 'drum'])
+                                                   sources=['sand', 'tank'])
             ])
         ]
         arrays = self.particles
@@ -123,5 +117,5 @@ class RotatingDrum(Application):
 
 
 if __name__ == '__main__':
-    app = RotatingDrum()
+    app = SettlingParticles()
     app.run()
