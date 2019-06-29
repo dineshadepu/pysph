@@ -852,14 +852,14 @@ class UpdateTangentialContactsNoRotation(Equation):
                                 last_idx_tmp]
                             d_tng_idx_dem_id[last_idx_tmp] = -1
 
-                            # decrease the last_idx_tmp, since we swapped it to
-                            # -1
-                            last_idx_tmp -= 1
-
                             # make tangential0 displacements zero
                             d_tng_x0[last_idx_tmp] = 0.
                             d_tng_y0[last_idx_tmp] = 0.
                             d_tng_z0[last_idx_tmp] = 0.
+
+                            # decrease the last_idx_tmp, since we swapped it to
+                            # -1
+                            last_idx_tmp -= 1
 
                         # decrement the total contacts of the particle
                         d_total_tng_contacts[d_idx] -= 1
