@@ -52,9 +52,10 @@ def get_particle_array_dem_linear(constants=None, **props):
     pa.add_constant('total_tng_contacts', [0] * len(pa.x))
 
     pa.set_output_arrays([
-        'x', 'y', 'z', 'u', 'v', 'w', 'wx', 'wy', 'wz', 'm', 'p', 'pid', 'tag',
+        'x', 'y', 'z', 'u', 'v', 'w', 'wx', 'wy', 'wz', 'm', 'pid', 'tag',
         'gid', 'fx', 'fy', 'fz', 'torx', 'tory', 'torz', 'I_inverse',
-        'm_inverse'])
+        'm_inverse', 'rad_s', 'dem_id'
+    ])
 
     return pa
 
@@ -774,8 +775,8 @@ class LinearPPFDEMNoRotationStage2(Equation):
 class UpdateTangentialContactsNoRotation(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_z, d_rad_s,
                         d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x,
-                        d_tng_y, d_tng_z, d_tng_nx, d_tng_ny, d_tng_nz,
-                        d_tng_idx_dem_id, s_x, s_y, s_z, s_rad_s, s_dem_id):
+                        d_tng_y, d_tng_z, d_tng_idx_dem_id, d_tng_x0, d_tng_y0,
+                        d_tng_z0, s_x, s_y, s_z, s_rad_s, s_dem_id):
         p = declare('int')
         count = declare('int')
         k = declare('int')
@@ -824,9 +825,10 @@ class UpdateTangentialContactsNoRotation(Equation):
                             d_tng_x[k] = 0.
                             d_tng_y[k] = 0.
                             d_tng_z[k] = 0.
-                            d_tng_nx[k] = 0.
-                            d_tng_ny[k] = 0.
-                            d_tng_nz[k] = 0.
+                            # make tangential0 displacements zero
+                            d_tng_x0[k] = 0.
+                            d_tng_y0[k] = 0.
+                            d_tng_z0[k] = 0.
                         else:
                             # swap the current tracking index with the final
                             # contact index
@@ -845,18 +847,6 @@ class UpdateTangentialContactsNoRotation(Equation):
                             d_tng_z[k] = d_tng_z[last_idx_tmp]
                             d_tng_z[last_idx_tmp] = 0.
 
-                            # swap tangential nx orientation
-                            d_tng_nx[k] = d_tng_nx[last_idx_tmp]
-                            d_tng_nx[last_idx_tmp] = 0.
-
-                            # swap tangential ny orientation
-                            d_tng_ny[k] = d_tng_nx[last_idx_tmp]
-                            d_tng_ny[last_idx_tmp] = 0.
-
-                            # swap tangential nz orientation
-                            d_tng_nz[k] = d_tng_nz[last_idx_tmp]
-                            d_tng_nz[last_idx_tmp] = 0.
-
                             # swap tangential idx dem id
                             d_tng_idx_dem_id[k] = d_tng_idx_dem_id[
                                 last_idx_tmp]
@@ -866,8 +856,15 @@ class UpdateTangentialContactsNoRotation(Equation):
                             # -1
                             last_idx_tmp -= 1
 
+                            # make tangential0 displacements zero
+                            d_tng_x0[last_idx_tmp] = 0.
+                            d_tng_y0[last_idx_tmp] = 0.
+                            d_tng_z0[last_idx_tmp] = 0.
+
                         # decrement the total contacts of the particle
                         d_total_tng_contacts[d_idx] -= 1
+                    else:
+                        k = k + 1
                 else:
                     k = k + 1
                 count += 1
@@ -1042,36 +1039,10 @@ class UpdateTangentialContacts(Equation):
 
 
 class RK2StepLinearDEMNoRotation(IntegratorStep):
-    def initialize(
-            self,
-            d_idx,
-            d_x,
-            d_y,
-            d_z,
-            d_x0,
-            d_y0,
-            d_z0,
-            d_u,
-            d_v,
-            d_w,
-            d_u0,
-            d_v0,
-            d_w0,
-            d_wx,
-            d_wy,
-            d_wz,
-            d_wx0,
-            d_wy0,
-            d_wz0,
-            d_total_tng_contacts,
-            d_limit,
-            d_tng_x,
-            d_tng_y,
-            d_tng_z,
-            d_tng_x0,
-            d_tng_y0,
-            d_tng_z0,
-    ):
+    def initialize(self, d_idx, d_x, d_y, d_z, d_x0, d_y0, d_z0, d_u, d_v, d_w,
+                   d_u0, d_v0, d_w0, d_wx, d_wy, d_wz, d_wx0, d_wy0, d_wz0,
+                   d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
+                   d_tng_x0, d_tng_y0, d_tng_z0):
 
         d_x0[d_idx] = d_x[d_idx]
         d_y0[d_idx] = d_y[d_idx]
