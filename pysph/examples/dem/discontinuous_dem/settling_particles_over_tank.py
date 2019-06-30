@@ -32,11 +32,11 @@ class SettlingParticles(Application):
 
     def initialize(self):
         self.dx = 0.05
-        self.dt = 5e-5
-        self.tf = 1.0
+        self.dt = 1e-4
+        self.tf = 5.
         self.dim = 2
-        self.en = 0.5
-        self.kn = 1e5
+        self.en = 0.1
+        self.kn = 1e6
         # friction coefficient
         self.mu = 0.5
         self.gy = -9.81
@@ -44,19 +44,19 @@ class SettlingParticles(Application):
 
     def create_particles(self):
         # create a tank
-        xt, yt = get_2d_tank(self.dx/2., [0., 0.], 1., 1.,  2)
-        rad_s = np.ones_like(xt) * self.dx / 4.
+        xt, yt = get_2d_tank(self.dx, [0., 0.], 0.4, 1., 2)
+        rad_s = np.ones_like(xt) * self.dx / 2.
         rho = 2500
         m = rho * np.pi * rad_s**2.
-        tank = get_particle_array(x=xt, y=yt, m=m,
-                                  rad_s=rad_s,
-                                  name="tank", wx=0.,
-                                  wy=0., wz=0.)
+        tank = get_particle_array(x=xt, y=yt, m=m, rad_s=rad_s, name="tank",
+                                  wx=0., wy=0., wz=0.)
         tank.add_property('dem_id', type='int')
         tank.dem_id[:] = 0
 
-        tank.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'rho', 'm', 'h',
-                                'pid', 'gid', 'tag', 'rad_s', 'dem_id'])
+        tank.set_output_arrays([
+            'x', 'y', 'z', 'u', 'v', 'w', 'rho', 'm', 'h', 'pid', 'gid', 'tag',
+            'rad_s', 'dem_id'
+        ])
         # drum.omega[2] = 30.
 
         # create a bunch of particles inside the drum
@@ -69,14 +69,15 @@ class SettlingParticles(Application):
         I_inverse = 1. / inertia
         sand = get_particle_array_dem_linear(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
-            rad_s=rad_s, dem_id=1, h=1.2*self.dx/2., name="sand")
+            rad_s=rad_s, dem_id=1, h=1.2 * self.dx / 2., name="sand")
 
         return [tank, sand]
 
     def create_scheme(self):
         ldemnrs = LinearDEMNoRotationScheme(
             dem_bodies=['sand'], rigid_bodies=None, solids=['tank'],
-            dim=self.dim, kn=self.kn, mu=self.mu, en=self.en, gy=self.gy)
+            walls=None, dim=self.dim, kn=self.kn, mu=self.mu, en=self.en,
+            gy=self.gy)
         s = SchemeChooser(default='ldemnrs', ldemnrs=ldemnrs)
         return s
 
@@ -88,7 +89,7 @@ class SettlingParticles(Application):
         scheme.configure()
         scheme.configure_solver(kernel=kernel,
                                 integrator_cls=EPECIntegratorMultiStage, dt=dt,
-                                tf=tf, pfreq=10)
+                                tf=tf)
 
     def _make_accel_eval(self, equations, pa_arrays):
         from pysph.tools.sph_evaluator import SPHEvaluator
@@ -126,7 +127,7 @@ class SettlingParticles(Application):
         b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = {t_rad}
         b.scalar = 'm'
-        '''.format(s_rad=self.dx/2., t_rad=self.dx/4.))
+        '''.format(s_rad=self.dx / 2., t_rad=self.dx / 2.))
 
 
 if __name__ == '__main__':

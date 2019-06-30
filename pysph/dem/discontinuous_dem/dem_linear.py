@@ -772,6 +772,461 @@ class LinearPPFDEMNoRotationStage2(Equation):
             d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_i
 
 
+class LinearPWFDEMNoRotationStage1(Equation):
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        self.kn = kn
+        self.kt = 2. / 7. * kn
+        self.kt_1 = 1. / self.kt
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        tmp = log(en)
+        self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
+        super(LinearPWFDEMNoRotationStage1, self).__init__(dest, sources)
+
+    def initialize_pair(self, d_idx, d_m, d_u, d_v, d_w, d_x, d_y, d_z, d_fx,
+                        d_fy, d_fz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0,
+                        d_tng_y0, d_tng_z0, d_tng_idx, d_tng_idx_dem_id,
+                        d_total_tng_contacts, d_dem_id, d_limit, d_wx, d_wy,
+                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_idx, s_x, s_y,
+                        s_z, s_nx, s_ny, s_nz, s_dem_id, s_np, dt):
+        i, n = declare('int', 2)
+        xij = declare('matrix(3)')
+        vij = declare('matrix(3)')
+        p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
+        n = s_np[0]
+        for i in range(n):
+            # Force calculation starts
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            xij[2] = d_z[d_idx] - s_z[i]
+            overlap = d_rad_s[d_idx] - (
+                xij[0] * s_nx[i] + xij[1] * s_ny[i] + xij[2] * s_nz[i])
+
+            if overlap > 0:
+                # basic variables: normal vector
+                nxc = -s_nx[i]
+                nyc = -s_ny[i]
+                nzc = -s_nz[i]
+
+                # ---- Relative velocity computation (Eq 2.9) ----
+                # relative velocity of particle d_idx w.r.t particle i at
+                # contact point.
+                # Distance till contact point
+                a_d = d_rad_s[d_idx] - overlap
+                # TODO: This has to be replaced by a custom cross product
+                # function
+                # wij = a_i * w_i + a_j * w_j
+                # since w_j is wall, and angular velocity is zero
+                # wij = a_i * w_i
+                wijx = a_d * d_wx[d_idx]
+                wijy = a_d * d_wy[d_idx]
+                wijz = a_d * d_wz[d_idx]
+                # wij \cross nij
+                wcn_x = wijy * nzc - wijz * nyc
+                wcn_y = wijz * nxc - wijx * nzc
+                wcn_z = wijx * nyc - wijy * nxc
+
+                vij[0] = d_u[d_idx]
+                vij[1] = d_v[d_idx]
+                vij[2] = d_w[d_idx]
+                vr_x = vij[0] + wcn_x
+                vr_y = vij[1] + wcn_y
+                vr_z = vij[2] + wcn_z
+
+                # normal velocity magnitude
+                vr_dot_nij = vr_x * nxc + vr_y * nyc + vr_z * nzc
+                vn_x = vr_dot_nij * nxc
+                vn_y = vr_dot_nij * nyc
+                vn_z = vr_dot_nij * nzc
+
+                # tangential velocity
+                vt_x = vr_x - vn_x
+                vt_y = vr_y - vn_y
+                vt_z = vr_z - vn_z
+                # magnitude of the tangential velocity
+                # vt_magn = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z)**0.5
+
+                # damping force is taken from
+                # "On the Determination of the Damping Coefficient
+                # of Non-linear Spring-dashpot System to Model
+                # Hertz Contact for Simulation by Discrete Element
+                # Method" paper.
+                # compute the damping constants
+                m_eff = d_m[d_idx]
+                eta_n = self.alpha * sqrt(m_eff)
+
+                # normal force
+                kn_overlap = self.kn * overlap**(1.5)
+                fn_x = -kn_overlap * nxc - eta_n * vn_x
+                fn_y = -kn_overlap * nyc - eta_n * vn_y
+                fn_z = -kn_overlap * nzc - eta_n * vn_z
+
+                # ------------- tangential force computation ----------------
+                # total number of contacts of particle i in destination
+                tot_ctcs = d_total_tng_contacts[d_idx]
+
+                # d_idx has a range of tracking indices with sources
+                # starting index is p
+                p = d_idx * d_limit[0]
+                # ending index is q -1
+                q1 = p + tot_ctcs
+
+                # check if the particle is in the tracking list
+                # if so, then save the location at found_at
+                found = 0
+                for j in range(p, q1):
+                    if i == d_tng_idx[j]:
+                        if s_dem_id[i] == d_tng_idx_dem_id[j]:
+                            found_at = j
+                            found = 1
+                            break
+
+                # if the particle is not been tracked then assign an index in
+                # tracking history.
+                if found == 0:
+                    found_at = q1
+                    d_tng_idx[found_at] = s_idx
+                    d_total_tng_contacts[d_idx] += 1
+                    d_tng_idx_dem_id[found_at] = s_dem_id[s_idx]
+
+                # compute the damping constants
+                eta_t = 0.5 * eta_n
+
+                # find the tangential force from the tangential
+                # displacement and tangential velocity (eq 2.11 Thesis Ye)
+                ft0_x = -self.kt * d_tng_x[found_at] - eta_t * vt_x
+                ft0_y = -self.kt * d_tng_y[found_at] - eta_t * vt_y
+                ft0_z = -self.kt * d_tng_z[found_at] - eta_t * vt_z
+
+                # (*) check against Coulomb criterion
+                # Tangential force magnitude due to displacement
+                ft0_magn = (ft0_x * ft0_x + ft0_y * ft0_y + ft0_z * ft0_z)**(
+                    0.5)
+                fn_magn = (fn_x * fn_x + fn_y * fn_y + fn_z * fn_z)**(0.5)
+
+                # we have to compare with static friction, so
+                # this mu has to be static friction coefficient
+                fn_mu = self.mu * fn_magn
+
+                # if the tangential force magnitude is zero, then do nothing,
+                # else do following
+                if ft0_magn != 0.:
+                    # compare tangential force with the static friction
+                    if ft0_magn >= fn_mu:
+                        # rescale the tangential displacement
+                        # find the unit direction in tangential velocity
+                        # TODO: ELIMINATE THE SINGULARITY CASE
+                        tx = ft0_x / ft0_magn
+                        ty = ft0_y / ft0_magn
+                        tz = ft0_z / ft0_magn
+                        # this taken from Luding paper [2], eq (21)
+                        kt_1 = 1. / self.kt
+                        d_tng_x[found_at] = -kt_1 * (fn_mu * tx + eta_t * vt_x)
+                        d_tng_y[found_at] = -kt_1 * (fn_mu * ty + eta_t * vt_y)
+                        d_tng_z[found_at] = -kt_1 * (fn_mu * tz + eta_t * vt_z)
+
+                        # and also adjust the spring elongation
+                        # at time t, which is used at stage 2 integrator
+                        d_tng_x0[found_at] = d_tng_x[found_at]
+                        d_tng_y0[found_at] = d_tng_y[found_at]
+                        d_tng_z0[found_at] = d_tng_z[found_at]
+
+                        # set the tangential force to static friction
+                        # from Coulomb criterion
+                        ft0_x = fn_mu * tx
+                        ft0_y = fn_mu * ty
+                        ft0_z = fn_mu * tz
+
+                dtb2 = dt / 2.
+                d_tng_x[found_at] += vt_x * dtb2
+                d_tng_y[found_at] += vt_y * dtb2
+                d_tng_z[found_at] += vt_z * dtb2
+
+                d_fx[d_idx] += fn_x + ft0_x
+                d_fy[d_idx] += fn_y + ft0_y
+                d_fz[d_idx] += fn_z + ft0_z
+
+                # torque = n cross F
+                d_torx[d_idx] += (nyc * ft0_z - nzc * ft0_y) * a_d
+                d_tory[d_idx] += (nzc * ft0_x - nxc * ft0_z) * a_d
+                d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_d
+
+
+class LinearPWFDEMNoRotationStage2(Equation):
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        self.kn = kn
+        self.kt = 2. / 7. * kn
+        self.kt_1 = 1. / self.kt
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        tmp = log(en)
+        self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
+        super(LinearPWFDEMNoRotationStage2, self).__init__(dest, sources)
+
+    def initialize_pair(self, d_idx, d_m, d_u, d_v, d_w, d_x, d_y, d_z, d_fx,
+                        d_fy, d_fz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0,
+                        d_tng_y0, d_tng_z0, d_tng_idx, d_tng_idx_dem_id,
+                        d_total_tng_contacts, d_dem_id, d_limit, d_wx, d_wy,
+                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_idx, s_x, s_y,
+                        s_z, s_nx, s_ny, s_nz, s_dem_id, s_np, dt):
+        i, n = declare('int', 2)
+        xij = declare('matrix(3)')
+        vij = declare('matrix(3)')
+        p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
+        n = s_np[0]
+        for i in range(n):
+            # Force calculation starts
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            xij[2] = d_z[d_idx] - s_z[i]
+            overlap = d_rad_s[d_idx] - (
+                xij[0] * s_nx[i] + xij[1] * s_ny[i] + xij[2] * s_nz[i])
+
+            if overlap > 0:
+                # basic variables: normal vector
+                nxc = -s_nx[i]
+                nyc = -s_ny[i]
+                nzc = -s_nz[i]
+
+                # ---- Relative velocity computation (Eq 2.9) ----
+                # relative velocity of particle d_idx w.r.t particle i at
+                # contact point.
+                # Distance till contact point
+                a_d = d_rad_s[d_idx] - overlap
+                # TODO: This has to be replaced by a custom cross product
+                # function
+                # wij = a_i * w_i + a_j * w_j
+                # since w_j is wall, and angular velocity is zero
+                # wij = a_i * w_i
+                wijx = a_d * d_wx[d_idx]
+                wijy = a_d * d_wy[d_idx]
+                wijz = a_d * d_wz[d_idx]
+                # wij \cross nij
+                wcn_x = wijy * nzc - wijz * nyc
+                wcn_y = wijz * nxc - wijx * nzc
+                wcn_z = wijx * nyc - wijy * nxc
+
+                vij[0] = d_u[d_idx]
+                vij[1] = d_v[d_idx]
+                vij[2] = d_w[d_idx]
+                vr_x = vij[0] + wcn_x
+                vr_y = vij[1] + wcn_y
+                vr_z = vij[2] + wcn_z
+
+                # normal velocity magnitude
+                vr_dot_nij = vr_x * nxc + vr_y * nyc + vr_z * nzc
+                vn_x = vr_dot_nij * nxc
+                vn_y = vr_dot_nij * nyc
+                vn_z = vr_dot_nij * nzc
+
+                # tangential velocity
+                vt_x = vr_x - vn_x
+                vt_y = vr_y - vn_y
+                vt_z = vr_z - vn_z
+                # magnitude of the tangential velocity
+                # vt_magn = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z)**0.5
+
+                # damping force is taken from
+                # "On the Determination of the Damping Coefficient
+                # of Non-linear Spring-dashpot System to Model
+                # Hertz Contact for Simulation by Discrete Element
+                # Method" paper.
+                # compute the damping constants
+                m_eff = d_m[d_idx]
+                eta_n = self.alpha * sqrt(m_eff)
+
+                # normal force
+                kn_overlap = self.kn * overlap**(1.5)
+                fn_x = -kn_overlap * nxc - eta_n * vn_x
+                fn_y = -kn_overlap * nyc - eta_n * vn_y
+                fn_z = -kn_overlap * nzc - eta_n * vn_z
+
+                # ------------- tangential force computation ----------------
+                # initialize tangential force
+                ft0_x = 0
+                ft0_y = 0
+                ft0_z = 0
+                # total number of contacts of particle i in destination
+                tot_ctcs = d_total_tng_contacts[d_idx]
+
+                # d_idx has a range of tracking indices with sources
+                # starting index is p
+                p = d_idx * d_limit[0]
+                # ending index is q -1
+                q1 = p + tot_ctcs
+
+                # check if the particle is in the tracking list
+                # if so, then save the location at found_at
+                found = 0
+                for j in range(p, q1):
+                    if i == d_tng_idx[j]:
+                        if s_dem_id[i] == d_tng_idx_dem_id[j]:
+                            found_at = j
+                            found = 1
+                            break
+
+                # do not add new particles to the contact list at step
+                # t + dt / 2. But normal force will be computed as above.
+
+                # Tangential force is computed if the particle is been tracked
+                # already. When the particle is not been tracked (found == 0),
+                # then it is an intermediate contact and we don't compute the
+                # tangential contact due to it.
+                if found == 1:
+                    # compute the damping constants
+                    eta_t = 0.5 * eta_n
+
+                    # find the tangential force from the tangential
+                    # displacement and tangential velocity (eq 2.11 Thesis Ye)
+                    ft0_x = -self.kt * d_tng_x[found_at] - eta_t * vt_x
+                    ft0_y = -self.kt * d_tng_y[found_at] - eta_t * vt_y
+                    ft0_z = -self.kt * d_tng_z[found_at] - eta_t * vt_z
+
+                    # (*) check against Coulomb criterion
+                    # Tangential force magnitude due to displacement
+                    ft0_magn = (
+                        ft0_x * ft0_x + ft0_y * ft0_y + ft0_z * ft0_z)**(0.5)
+                    fn_magn = (fn_x * fn_x + fn_y * fn_y + fn_z * fn_z)**(0.5)
+
+                    # we have to compare with static friction, so
+                    # this mu has to be static friction coefficient
+                    fn_mu = self.mu * fn_magn
+
+                    # if the tangential force magnitude is zero, then do
+                    # nothing, else do following
+                    if ft0_magn != 0.:
+                        # compare tangential force with the static friction
+                        if ft0_magn >= fn_mu:
+                            # rescale the tangential displacement
+                            # find the unit direction in tangential velocity
+                            # TODO: ELIMINATE THE SINGULARITY CASE
+                            tx = ft0_x / ft0_magn
+                            ty = ft0_y / ft0_magn
+                            tz = ft0_z / ft0_magn
+
+                            # set the tangential force to static friction
+                            # from Coulomb criterion
+                            ft0_x = fn_mu * tx
+                            ft0_y = fn_mu * ty
+                            ft0_z = fn_mu * tz
+
+                    # increment the tang spring to next time step
+                    # which here is stage 2
+                    d_tng_x[found_at] = d_tng_x0[found_at] + vt_x * dt
+                    d_tng_y[found_at] = d_tng_y0[found_at] + vt_y * dt
+                    d_tng_z[found_at] = d_tng_z0[found_at] + vt_z * dt
+
+                d_fx[d_idx] += fn_x + ft0_x
+                d_fy[d_idx] += fn_y + ft0_y
+                d_fz[d_idx] += fn_z + ft0_z
+
+                # torque = n cross F
+                d_torx[d_idx] += (nyc * ft0_z - nzc * ft0_y) * a_d
+                d_tory[d_idx] += (nzc * ft0_x - nxc * ft0_z) * a_d
+                d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_d
+
+
+class UpdateTangentialContactsWallNoRotation(Equation):
+    def initialize_pair(self, d_idx, d_x, d_y, d_z, d_rad_s,
+                        d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x,
+                        d_tng_y, d_tng_z, d_tng_idx_dem_id, d_tng_x0, d_tng_y0,
+                        d_tng_z0, s_x, s_y, s_z, s_nx, s_ny, s_nz,
+                        s_dem_id):
+        p = declare('int')
+        count = declare('int')
+        k = declare('int')
+        xij = declare('matrix(3)')
+        last_idx_tmp = declare('int')
+        sidx = declare('int')
+        dem_id = declare('int')
+        rij = 0.0
+
+        idx_total_ctcs = declare('int')
+        idx_total_ctcs = d_total_tng_contacts[d_idx]
+        # particle idx contacts has range of indices
+        # and the first index would be
+        p = d_idx * d_limit[0]
+        last_idx_tmp = p + idx_total_ctcs - 1
+        k = p
+        count = 0
+
+        # loop over all the contacts of particle d_idx
+        while count < idx_total_ctcs:
+            # The index of the particle with which
+            # d_idx in contact is
+            sidx = d_tng_idx[k]
+            # get the dem id of the particle
+            dem_id = d_tng_idx_dem_id[k]
+
+            if sidx == -1:
+                break
+            else:
+                if dem_id == s_dem_id[sidx]:
+                    xij[0] = d_x[d_idx] - s_x[sidx]
+                    xij[1] = d_y[d_idx] - s_y[sidx]
+                    xij[2] = d_z[d_idx] - s_z[sidx]
+                    overlap = d_rad_s[d_idx] - (
+                        xij[0] * s_nx[sidx] + xij[1] * s_ny[sidx] +
+                        xij[2] * s_nz[sidx])
+
+                    if overlap <= 0.:
+                        # if the swap index is the current index then
+                        # simply make it to null contact.
+                        if k == last_idx_tmp:
+                            d_tng_idx[k] = -1
+                            d_tng_idx_dem_id[k] = -1
+                            d_tng_x[k] = 0.
+                            d_tng_y[k] = 0.
+                            d_tng_z[k] = 0.
+                            # make tangential0 displacements zero
+                            d_tng_x0[k] = 0.
+                            d_tng_y0[k] = 0.
+                            d_tng_z0[k] = 0.
+                        else:
+                            # swap the current tracking index with the final
+                            # contact index
+                            d_tng_idx[k] = d_tng_idx[last_idx_tmp]
+                            d_tng_idx[last_idx_tmp] = -1
+
+                            # swap tangential x displacement
+                            d_tng_x[k] = d_tng_x[last_idx_tmp]
+                            d_tng_x[last_idx_tmp] = 0.
+
+                            # swap tangential y displacement
+                            d_tng_y[k] = d_tng_x[last_idx_tmp]
+                            d_tng_y[last_idx_tmp] = 0.
+
+                            # swap tangential z displacement
+                            d_tng_z[k] = d_tng_z[last_idx_tmp]
+                            d_tng_z[last_idx_tmp] = 0.
+
+                            # swap tangential idx dem id
+                            d_tng_idx_dem_id[k] = d_tng_idx_dem_id[
+                                last_idx_tmp]
+                            d_tng_idx_dem_id[last_idx_tmp] = -1
+
+                            # make tangential0 displacements zero
+                            d_tng_x0[last_idx_tmp] = 0.
+                            d_tng_y0[last_idx_tmp] = 0.
+                            d_tng_z0[last_idx_tmp] = 0.
+
+                            # decrease the last_idx_tmp, since we swapped it to
+                            # -1
+                            last_idx_tmp -= 1
+
+                        # decrement the total contacts of the particle
+                        d_total_tng_contacts[d_idx] -= 1
+                    else:
+                        k = k + 1
+                else:
+                    k = k + 1
+                count += 1
+
+
 class UpdateTangentialContactsNoRotation(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_z, d_rad_s,
                         d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x,

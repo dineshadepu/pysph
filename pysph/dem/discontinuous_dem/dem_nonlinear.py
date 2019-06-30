@@ -7,6 +7,17 @@ from math import sqrt, asin, sin, cos, pi, log
 from pysph.sph.scheme import Scheme
 
 
+class EuleIntegratorMultiStage(Integrator):
+    def one_timestep(self, t, dt):
+        self.compute_accelerations(0, update_nnps=True)
+
+        # Predict
+        self.stage1()
+
+    def initial_acceleration(self, t, dt):
+        pass
+
+
 class EPECIntegratorMultiStage(Integrator):
     def one_timestep(self, t, dt):
         self.initialize()
@@ -594,6 +605,7 @@ class TsuijiNonLinearParticleWallForceStage1(Equation):
         xij = declare('matrix(3)')
         vij = declare('matrix(3)')
         p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
+        # s_np is total number of walls in the particle array
         for i in range(s_np[0]):
             # total number of contacts of particle i in destination
             tot_ctcs = d_total_tng_contacts[d_idx]
