@@ -789,7 +789,7 @@ class LinearPWFDEMNoRotationStage1(Equation):
                         d_fy, d_fz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0,
                         d_tng_y0, d_tng_z0, d_tng_idx, d_tng_idx_dem_id,
                         d_total_tng_contacts, d_dem_id, d_limit, d_wx, d_wy,
-                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_idx, s_x, s_y,
+                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_x, s_y,
                         s_z, s_nx, s_ny, s_nz, s_dem_id, s_np, dt):
         i, n = declare('int', 2)
         xij = declare('matrix(3)')
@@ -859,7 +859,7 @@ class LinearPWFDEMNoRotationStage1(Equation):
                 eta_n = self.alpha * sqrt(m_eff)
 
                 # normal force
-                kn_overlap = self.kn * overlap**(1.5)
+                kn_overlap = self.kn * overlap
                 fn_x = -kn_overlap * nxc - eta_n * vn_x
                 fn_y = -kn_overlap * nyc - eta_n * vn_y
                 fn_z = -kn_overlap * nzc - eta_n * vn_z
@@ -888,9 +888,9 @@ class LinearPWFDEMNoRotationStage1(Equation):
                 # tracking history.
                 if found == 0:
                     found_at = q1
-                    d_tng_idx[found_at] = s_idx
+                    d_tng_idx[found_at] = i
                     d_total_tng_contacts[d_idx] += 1
-                    d_tng_idx_dem_id[found_at] = s_dem_id[s_idx]
+                    d_tng_idx_dem_id[found_at] = s_dem_id[i]
 
                 # compute the damping constants
                 eta_t = 0.5 * eta_n
@@ -971,7 +971,7 @@ class LinearPWFDEMNoRotationStage2(Equation):
                         d_fy, d_fz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0,
                         d_tng_y0, d_tng_z0, d_tng_idx, d_tng_idx_dem_id,
                         d_total_tng_contacts, d_dem_id, d_limit, d_wx, d_wy,
-                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_idx, s_x, s_y,
+                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_x, s_y,
                         s_z, s_nx, s_ny, s_nz, s_dem_id, s_np, dt):
         i, n = declare('int', 2)
         xij = declare('matrix(3)')
@@ -1041,7 +1041,7 @@ class LinearPWFDEMNoRotationStage2(Equation):
                 eta_n = self.alpha * sqrt(m_eff)
 
                 # normal force
-                kn_overlap = self.kn * overlap**(1.5)
+                kn_overlap = self.kn * overlap
                 fn_x = -kn_overlap * nxc - eta_n * vn_x
                 fn_y = -kn_overlap * nyc - eta_n * vn_y
                 fn_z = -kn_overlap * nzc - eta_n * vn_z
@@ -1135,6 +1135,7 @@ class LinearPPFDEMNoRotation(Equation):
     """
     Use this equation in an Euler integrator only
     """
+
     def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
         self.kn = kn
         self.kt = 2. / 7. * kn
@@ -1495,8 +1496,7 @@ class UpdateTangentialContactsWallNoRotation(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_z, d_rad_s,
                         d_total_tng_contacts, d_tng_idx, d_limit, d_tng_x,
                         d_tng_y, d_tng_z, d_tng_idx_dem_id, d_tng_x0, d_tng_y0,
-                        d_tng_z0, s_x, s_y, s_z, s_nx, s_ny, s_nz,
-                        s_dem_id):
+                        d_tng_z0, s_x, s_y, s_z, s_nx, s_ny, s_nz, s_dem_id):
         p = declare('int')
         count = declare('int')
         k = declare('int')
@@ -2027,8 +2027,8 @@ class RK2StepLinearDEM(IntegratorStep):
 
 
 class LinearDEMNoRotationEulerScheme(Scheme):
-    def __init__(self, dem_bodies, rigid_bodies, solids, walls, dim, kn, mu=0.5,
-                 en=1.0, gx=0.0, gy=0.0, gz=0.0, debug=False):
+    def __init__(self, dem_bodies, rigid_bodies, solids, walls, dim, kn,
+                 mu=0.5, en=1.0, gx=0.0, gy=0.0, gz=0.0, debug=False):
         self.dem_bodies = dem_bodies
         self.rigid_bodies = rigid_bodies
         self.solids = solids
@@ -2091,15 +2091,14 @@ class LinearDEMNoRotationEulerScheme(Scheme):
                               gz=self.gz))
             for name in self.dem_bodies:
                 g1.append(
-                    LinearPPFDEMNoRotation(dest=name, sources=all,
-                                           en=self..en, mu=self.mu,
-                                           kn=self.kn))
+                    LinearPPFDEMNoRotation(dest=name, sources=all, en=self.en,
+                                           mu=self.mu, kn=self.kn))
             if self.walls is not None:
                 for name in self.dem_bodies:
                     g1.append(
-                        LinearPPFDEMNoRotationStage1(dest=name, sources=self.walls,
-                                                     en=self.en, mu=self.mu,
-                                                     kn=self.kn))
+                        LinearPPFDEMNoRotationStage1(
+                            dest=name, sources=self.walls, en=self.en,
+                            mu=self.mu, kn=self.kn))
             stage1.append(Group(equations=g1, real=False))
 
         g2 = []
@@ -2118,11 +2117,12 @@ class LinearDEMNoRotationEulerScheme(Scheme):
 
 
 class LinearDEMNoRotationScheme(Scheme):
-    def __init__(self, dem_bodies, rigid_bodies, solids, dim, kn, mu=0.5,
-                 en=1.0, gx=0.0, gy=0.0, gz=0.0, debug=False):
+    def __init__(self, dem_bodies, rigid_bodies, solids, walls, dim, kn,
+                 mu=0.5, en=1.0, gx=0.0, gy=0.0, gz=0.0, debug=False):
         self.dem_bodies = dem_bodies
         self.rigid_bodies = rigid_bodies
         self.solids = solids
+        self.walls = walls
         self.dim = dim
         self.kn = kn
         self.mu = mu
@@ -2184,6 +2184,12 @@ class LinearDEMNoRotationScheme(Scheme):
                     LinearPPFDEMNoRotationStage1(dest=name, sources=all,
                                                  en=self.en, mu=self.mu,
                                                  kn=self.kn))
+            if self.walls is not None:
+                for name in self.dem_bodies:
+                    g1.append(
+                        LinearPWFDEMNoRotationStage1(
+                            dest=name, sources=self.walls, en=self.en,
+                            mu=self.mu, kn=self.kn))
             stage1.append(Group(equations=g1, real=False))
 
         g2 = []
@@ -2211,6 +2217,12 @@ class LinearDEMNoRotationScheme(Scheme):
                     LinearPPFDEMNoRotationStage2(dest=name, sources=all,
                                                  en=self.en, mu=self.mu,
                                                  kn=self.kn))
+            if self.walls is not None:
+                for name in self.dem_bodies:
+                    g1.append(
+                        LinearPWFDEMNoRotationStage2(
+                            dest=name, sources=self.walls, en=self.en,
+                            mu=self.mu, kn=self.kn))
             stage2.append(Group(equations=g1, real=False))
 
         g2 = []
@@ -2229,11 +2241,12 @@ class LinearDEMNoRotationScheme(Scheme):
 
 
 class LinearDEMScheme(Scheme):
-    def __init__(self, dem_bodies, rigid_bodies, solids, dim, kn, mu=0.5,
-                 en=1.0, gx=0.0, gy=0.0, gz=0.0, debug=False):
+    def __init__(self, dem_bodies, rigid_bodies, solids, dim, kn, walls=None,
+                 mu=0.5, en=1.0, gx=0.0, gy=0.0, gz=0.0, debug=False):
         self.dem_bodies = dem_bodies
         self.rigid_bodies = rigid_bodies
         self.solids = solids
+        self.walls = walls
         self.dim = dim
         self.kn = kn
         self.mu = mu

@@ -75,6 +75,24 @@ class SettlingParticles(Application):
 
         return [wall, sand]
 
+    # def create_scheme(self):
+    #     ldems = LinearDEMNoRotationScheme(
+    #         dem_bodies=['sand'], rigid_bodies=None, solids=None, walls=[
+    #             'wall'
+    #         ], dim=self.dim, kn=self.kn, mu=self.mu, en=self.en, gy=self.gy)
+    #     s = SchemeChooser(default='ldems', ldems=ldems)
+    #     return s
+
+    # def configure_scheme(self):
+    #     scheme = self.scheme
+    #     kernel = CubicSpline(dim=self.dim)
+    #     tf = self.tf
+    #     dt = self.dt
+    #     scheme.configure()
+    #     scheme.configure_solver(kernel=kernel,
+    #                             integrator_cls=EPECIntegratorMultiStage, dt=dt,
+    #                             tf=tf)
+
     def create_equations(self):
         eq1 = [
             Group(

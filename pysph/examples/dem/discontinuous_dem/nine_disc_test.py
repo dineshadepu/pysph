@@ -1,11 +1,3 @@
-"""
-Simulation of solid-fluid mixture flow using moving particle methods
-Shuai Zhang
-
-link: https://www.sciencedirect.com/science/article/pii/S0021999108006499
-
-Time: 7 minutes
-"""
 from __future__ import print_function
 import numpy as np
 
@@ -25,31 +17,7 @@ from pysph.sph.dem import (
 from pysph.tools.geometry import (get_2d_tank)
 
 
-def create_circle(diameter=1, spacing=0.05, center=None):
-    dx = spacing
-    x = [0.0]
-    y = [0.0]
-    r = spacing
-    nt = 0
-    while r < diameter / 2:
-        nnew = int(np.pi * r**2 / dx**2 + 0.5)
-        tomake = nnew - nt
-        theta = np.linspace(0., 2. * np.pi, tomake + 1)
-        for t in theta[:-1]:
-            x.append(r * np.cos(t))
-            y.append(r * np.sin(t))
-        nt = nnew
-        r = r + dx
-    x = np.array(x)
-    y = np.array(y)
-    x, y = (t.ravel() for t in (x, y))
-    if center is None:
-        return x, y
-    else:
-        return x + center[0], y + center[1]
-
-
-class ZhangStackOfCylinders(Application):
+class NineDiskTest(Application):
     def initialize(self):
         self.dam_length = 26 * 1e-2
         self.dam_height = 26 * 1e-2
@@ -295,7 +263,7 @@ class ZhangStackOfCylinders(Application):
 
 
 if __name__ == '__main__':
-    app = ZhangStackOfCylinders()
+    app = NineDiskTest()
     # app.geometry()
     app.run()
     # app.post_process()

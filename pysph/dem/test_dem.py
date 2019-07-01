@@ -59,6 +59,7 @@ def get_particle_array_from_file(file_name, name):
 
 def analyse_tng_cnt_info(pa, idx):
     limit = pa.limit[0]
+    print("ids of partticle {idx} in contact".format(idx=idx))
     print(pa.tng_idx[limit * idx:limit * idx + limit])
     print('tng_x, tng_y, tng_z')
     print(pa.tng_x[limit * idx:limit * idx + limit])
@@ -70,7 +71,7 @@ def analyse_tng_cnt_info(pa, idx):
     print(pa.tng_z0[limit * idx:limit * idx + limit])
     print('total tng contacts')
     print(pa.total_tng_contacts[idx])
-    print('contact dem idx')
+    print('contact idx dem number')
     print(pa.tng_idx_dem_id[limit * idx:limit * idx + limit])
     print('force on '+str(idx)+' is ')
     print(pa.fx[idx])
