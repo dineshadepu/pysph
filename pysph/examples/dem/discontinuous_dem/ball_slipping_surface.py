@@ -21,52 +21,54 @@ from pysph.tools.geometry import get_2d_tank, get_2d_block
 from pysph.sph.equation import Group, MultiStageEquations
 
 
-class TwoStackedParticles(Application):
+class BallSlipping(Application):
     def __init__(self, theta=0.):
         self.theta = theta
-        super(TwoStackedParticles, self).__init__()
+        super(BallSlipping, self).__init__()
 
     def initialize(self):
-        self.dt = 1e-6
-        self.tf = 0.001
+        self.dx = 0.05
+        self.dt = 1e-4
+        self.tf = 0.5
         self.dim = 2
-        self.en = 0.8
-        self.kn = 1000
+        self.en = 0.9
+        self.kn = 50000
         # friction coefficient
         self.mu = 0.5
-        self.gy = 0.
+        self.gy = -9.81
         self.seval = None
-        self.radius = 0.05 * 1e-2
+        self.radius = 0.1
+        self.wall_time = 0.1
 
     def create_particles(self):
         # wall
-        xw_a = np.array([0., 0.])
-        yw_a = np.array([0., 3.6 * self.radius])
-        nxw_a = np.array([0., 0.])
-        nyw_a = np.array([1., -1])
+        xw_a = np.array([0.])
+        yw_a = np.array([0.])
+        nxw_a = np.array([0])
+        nyw_a = np.array([1.])
         wall = get_particle_array(x=xw_a, y=yw_a, nx=nxw_a, ny=nyw_a, nz=0.,
                                   constants={'np': len(xw_a)}, name="wall")
         wall.add_property('dem_id', type='int')
-        wall.dem_id[:] = 1
+        wall.dem_id[:] = 0
 
         # create a particle
-        xp = np.array([0., 0.])
-        yp = np.array([0.25 * 3.6 * self.radius, 0.75 * 3.6 * self.radius])
-        rho = np.array([20000, 10000])
+        xp = np.array([0.])
+        yp = np.array([self.radius])
+        rho = 2600
         m = rho * 4. / 3. * np.pi * self.radius**3
         I = 2. / 5. * m * self.radius**2.
         m_inverse = 1. / m
         I_inverse = 1. / I
         sand = get_particle_array_dem_linear(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
-            rad_s=self.radius, dem_id=0, h=2 * self.radius, name="sand")
+            rad_s=self.radius, dem_id=1, h=1.2 * self.dx / 2., name="sand")
 
         return [wall, sand]
 
     def create_scheme(self):
         ldems = LinearDEMNoRotationScheme(
             dem_bodies=['sand'], rigid_bodies=None, solids=None, walls=[
-                "wall"
+                'wall'
             ], dim=self.dim, kn=self.kn, mu=self.mu, en=self.en, gy=self.gy)
         s = SchemeChooser(default='ldems', ldems=ldems)
         return s
@@ -136,8 +138,6 @@ class TwoStackedParticles(Application):
             Group(equations=[
                 UpdateTangentialContactsWallNoRotation(dest='sand',
                                                        sources=['wall']),
-                UpdateTangentialContactsNoRotation(dest='sand',
-                                                   sources=['sand']),
             ])
         ]
         arrays = self.particles
@@ -146,12 +146,20 @@ class TwoStackedParticles(Application):
         # When
         a_eval.evaluate(t, dt)
 
+        # give a tangential velocity to the particles
+        # once it settles down
+        T = self.wall_time
+        if (T - dt / 2) < t < (T + dt / 2):
+            for pa in self.particles:
+                if pa.name == 'sand':
+                    pa.u[0] = 1.
+
     def customize_output(self):
         self._mayavi_config('''
         b = particle_arrays['sand']
         b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
-        b.scalar = 'y'
+        b.scalar = 'fy'
         '''.format(s_rad=self.radius))
 
     def post_process(self, info_fname):
@@ -161,31 +169,32 @@ class TwoStackedParticles(Application):
 
         from pysph.solver.utils import iter_output
         import matplotlib.pyplot as plt
-        import os
 
         files = self.output_files
         # simulated data
-        t, yl, yu = [], [], []
+        t, y, v = [], [], []
         for sd, arrays in iter_output(files):
             sand = arrays['sand']
             t.append(sd['t'])
-            yl.append(sand.y[0])
-            yu.append(sand.y[1])
+            y.append(sand.y[0])
+            v.append(sand.v[0])
 
-        plt.scatter(t, yl, label='t vs yl')
-        plt.xlim(0., 0.001)
-        plt.ylim(0.0004, 0.00047)
-        fig = os.path.join(self.output_dir, "t_vs_yl.png")
-        plt.savefig(fig, dpi=300)
+        data = np.loadtxt('ffpw_y.csv', delimiter=',')
+        ta = data[:, 0]
+        ya = data[:, 1]
+        plt.plot(ta, ya)
+        plt.scatter(t, y)
+        plt.savefig('t_vs_y.png')
         plt.clf()
 
-        plt.scatter(t, yu, label='t vs yu')
-        plt.xlim(0., 0.001)
-        plt.ylim(0.00132, 0.0014)
-        fig = os.path.join(self.output_dir, "t_vs_yu.png")
-        plt.savefig(fig, dpi=300)
+        data = np.loadtxt('ffpw_v.csv', delimiter=',')
+        ta = data[:, 0]
+        va = data[:, 1]
+        plt.plot(ta, va)
+        plt.scatter(t, v)
+        plt.savefig('t_vs_v.png')
 
 
 if __name__ == '__main__':
-    app = TwoStackedParticles()
+    app = BallSlipping()
     app.run()
