@@ -570,9 +570,9 @@ class LinearPPFDEMNoRotationStage1(Equation):
                     tz = ft0_z / ft0_magn
                     kt_1 = 1. / self.kt
                     # this taken from Luding paper [2], eq (21)
-                    d_tng_x[found_at] = -kt_1 * (fn_mu * tx + eta_t * vt_x)
-                    d_tng_y[found_at] = -kt_1 * (fn_mu * ty + eta_t * vt_y)
-                    d_tng_z[found_at] = -kt_1 * (fn_mu * tz + eta_t * vt_z)
+                    d_tng_x[found_at] = kt_1 * (fn_mu * tx + eta_t * vt_x)
+                    d_tng_y[found_at] = kt_1 * (fn_mu * ty + eta_t * vt_y)
+                    d_tng_z[found_at] = kt_1 * (fn_mu * tz + eta_t * vt_z)
 
                     # and also adjust the spring elongation
                     # at time t, which is used at stage 2 integrator
@@ -789,8 +789,8 @@ class LinearPWFDEMNoRotationStage1(Equation):
                         d_fy, d_fz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0,
                         d_tng_y0, d_tng_z0, d_tng_idx, d_tng_idx_dem_id,
                         d_total_tng_contacts, d_dem_id, d_limit, d_wx, d_wy,
-                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_x, s_y,
-                        s_z, s_nx, s_ny, s_nz, s_dem_id, s_np, dt):
+                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_x, s_y, s_z,
+                        s_nx, s_ny, s_nz, s_dem_id, s_np, dt):
         i, n = declare('int', 2)
         xij = declare('matrix(3)')
         vij = declare('matrix(3)')
@@ -924,9 +924,9 @@ class LinearPWFDEMNoRotationStage1(Equation):
                         tz = ft0_z / ft0_magn
                         # this taken from Luding paper [2], eq (21)
                         kt_1 = 1. / self.kt
-                        d_tng_x[found_at] = -kt_1 * (fn_mu * tx + eta_t * vt_x)
-                        d_tng_y[found_at] = -kt_1 * (fn_mu * ty + eta_t * vt_y)
-                        d_tng_z[found_at] = -kt_1 * (fn_mu * tz + eta_t * vt_z)
+                        d_tng_x[found_at] = kt_1 * (fn_mu * tx + eta_t * vt_x)
+                        d_tng_y[found_at] = kt_1 * (fn_mu * ty + eta_t * vt_y)
+                        d_tng_z[found_at] = kt_1 * (fn_mu * tz + eta_t * vt_z)
 
                         # and also adjust the spring elongation
                         # at time t, which is used at stage 2 integrator

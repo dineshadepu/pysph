@@ -60,9 +60,16 @@ class SettlingParticles(Application):
         wall.add_property('dem_id', type='int')
         wall.dem_id[:] = 0
 
-        # create a bunch of particles inside the drum
-        xp, yp = get_2d_block(self.dx, 0.3, 0.3, [0., 0.2])
-        xp[0] += self.dx / 8.
+        # create bunch of particle
+        # xp, yp = np.mgrid[0:1.:self.dx, self.dx/2.:1.:self.dx]
+        # xp[0] -= self.dx / 8.
+        # u[:] = 0.
+
+        # create 4 particles
+        dx = self.dx
+        xp = np.array([0., 2.*dx, 4.*dx, 6.*dx])
+        yp = np.ones_like(xp) * 2. * dx
+        u = np.array([1., -1., 1, -1])
         rad_s = np.ones_like(xp) * self.dx / 2.
         rho = 2500
         m = rho * np.pi * rad_s**2.
@@ -70,7 +77,7 @@ class SettlingParticles(Application):
         m_inverse = 1. / m
         I_inverse = 1. / inertia
         sand = get_particle_array_dem_linear(
-            x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
+            x=xp, y=yp, u=u, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
             rad_s=rad_s, dem_id=1, h=1.2 * self.dx / 2., name="sand")
 
         return [wall, sand]
@@ -168,7 +175,7 @@ class SettlingParticles(Application):
         b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
         b.scalar = 'fy'
-        '''.format(s_rad=self.dx / 2.))
+        '''.format(s_rad=self.dx/2.))
 
 
 if __name__ == '__main__':

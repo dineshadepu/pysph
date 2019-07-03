@@ -29,16 +29,20 @@ class BallSlipping(Application):
     def initialize(self):
         self.dx = 0.05
         self.dt = 1e-4
-        self.tf = 0.5
+        self.pfreq = 100
+        self.wall_time = 5.
+        self.debug_time = 0.02
+        self.tf = self.wall_time + self.debug_time
         self.dim = 2
-        self.en = 0.9
+        self.en = 0.5
         self.kn = 50000
         # friction coefficient
         self.mu = 0.5
         self.gy = -9.81
         self.seval = None
         self.radius = 0.1
-        self.wall_time = 0.1
+        self.slow_pfreq = 1
+        self.slow_dt = 1e-4
 
     def create_particles(self):
         # wall
@@ -53,14 +57,15 @@ class BallSlipping(Application):
 
         # create a particle
         xp = np.array([0.])
-        yp = np.array([self.radius])
+        yp = np.array([self.radius+1.])
+        u = np.array([1.])
         rho = 2600
         m = rho * 4. / 3. * np.pi * self.radius**3
         I = 2. / 5. * m * self.radius**2.
         m_inverse = 1. / m
         I_inverse = 1. / I
         sand = get_particle_array_dem_linear(
-            x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
+            x=xp, y=yp, u=u, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
             rad_s=self.radius, dem_id=1, h=1.2 * self.dx / 2., name="sand")
 
         return [wall, sand]
@@ -81,7 +86,7 @@ class BallSlipping(Application):
         scheme.configure()
         scheme.configure_solver(kernel=kernel,
                                 integrator_cls=EPECIntegratorMultiStage, dt=dt,
-                                tf=tf)
+                                tf=tf, pfreq=self.pfreq)
 
     # def create_equations(self):
     #     eq1 = [
@@ -150,13 +155,17 @@ class BallSlipping(Application):
         # once it settles down
         T = self.wall_time
         if (T - dt / 2) < t < (T + dt / 2):
-            for pa in self.particles:
-                if pa.name == 'sand':
-                    pa.u[0] = 1.
+            # for pa in self.particles:
+            #     if pa.name == 'sand':
+            #         pa.u[0] = 1.
+            solver.dt = self.slow_dt
+            solver.set_print_freq(self.slow_pfreq)
 
     def customize_output(self):
         self._mayavi_config('''
         b = particle_arrays['sand']
+        b.vectors = 'fx, fy, fz'
+        b.show_vectors = True
         b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
         b.scalar = 'fy'
