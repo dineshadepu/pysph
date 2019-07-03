@@ -949,10 +949,25 @@ class LinearPWFDEMNoRotationStage1(Equation):
                 d_fy[d_idx] += fn_y + ft0_y
                 d_fz[d_idx] += fn_z + ft0_z
 
+                # frictional torque
+                tor_fric_x = 0.
+                tor_fric_y = 0.
+                tor_fric_z = 0.
+                omega_magn = (
+                    d_wx[d_idx]**2. + d_wy[d_idx]**2. + d_wz[d_idx]**2.)**0.5
+
+                if omega_magn > 0.:
+                    omega_nx = d_wx[d_idx] / omega_magn
+                    omega_ny = d_wy[d_idx] / omega_magn
+                    omega_nz = d_wz[d_idx] / omega_magn
+                    tor_fric_x = -self.mu * fn_magn * omega_nx
+                    tor_fric_y = -self.mu * fn_magn * omega_ny
+                    tor_fric_z = -self.mu * fn_magn * omega_nz
+
                 # torque = n cross F
-                d_torx[d_idx] += (nyc * ft0_z - nzc * ft0_y) * a_d
-                d_tory[d_idx] += (nzc * ft0_x - nxc * ft0_z) * a_d
-                d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_d
+                d_torx[d_idx] += (nyc * ft0_z - nzc * ft0_y) * a_d + tor_fric_x
+                d_tory[d_idx] += (nzc * ft0_x - nxc * ft0_z) * a_d + tor_fric_y
+                d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_d + tor_fric_z
 
 
 class LinearPWFDEMNoRotationStage2(Equation):
@@ -971,8 +986,8 @@ class LinearPWFDEMNoRotationStage2(Equation):
                         d_fy, d_fz, d_tng_x, d_tng_y, d_tng_z, d_tng_x0,
                         d_tng_y0, d_tng_z0, d_tng_idx, d_tng_idx_dem_id,
                         d_total_tng_contacts, d_dem_id, d_limit, d_wx, d_wy,
-                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_x, s_y,
-                        s_z, s_nx, s_ny, s_nz, s_dem_id, s_np, dt):
+                        d_wz, d_torx, d_tory, d_torz, d_rad_s, s_x, s_y, s_z,
+                        s_nx, s_ny, s_nz, s_dem_id, s_np, dt):
         i, n = declare('int', 2)
         xij = declare('matrix(3)')
         vij = declare('matrix(3)')
@@ -1125,10 +1140,25 @@ class LinearPWFDEMNoRotationStage2(Equation):
                 d_fy[d_idx] += fn_y + ft0_y
                 d_fz[d_idx] += fn_z + ft0_z
 
+                # frictional torque
+                tor_fric_x = 0.
+                tor_fric_y = 0.
+                tor_fric_z = 0.
+                omega_magn = (
+                    d_wx[d_idx]**2. + d_wy[d_idx]**2. + d_wz[d_idx]**2.)**0.5
+
+                if omega_magn > 0.:
+                    omega_nx = d_wx[d_idx] / omega_magn
+                    omega_ny = d_wy[d_idx] / omega_magn
+                    omega_nz = d_wz[d_idx] / omega_magn
+                    tor_fric_x = -self.mu * fn_magn * omega_nx
+                    tor_fric_y = -self.mu * fn_magn * omega_ny
+                    tor_fric_z = -self.mu * fn_magn * omega_nz
+
                 # torque = n cross F
-                d_torx[d_idx] += (nyc * ft0_z - nzc * ft0_y) * a_d
-                d_tory[d_idx] += (nzc * ft0_x - nxc * ft0_z) * a_d
-                d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_d
+                d_torx[d_idx] += (nyc * ft0_z - nzc * ft0_y) * a_d + tor_fric_x
+                d_tory[d_idx] += (nzc * ft0_x - nxc * ft0_z) * a_d + tor_fric_y
+                d_torz[d_idx] += (nxc * ft0_y - nyc * ft0_x) * a_d + tor_fric_z
 
 
 class LinearPPFDEMNoRotation(Equation):

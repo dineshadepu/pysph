@@ -1,6 +1,7 @@
 import numpy as np
 from math import asin, cos, sin
 from pysph.solver.output import load
+from pysph.solver.utils import get_files, iter_output
 from pysph.base.kernels import CubicSpline
 
 
@@ -73,7 +74,7 @@ def analyse_tng_cnt_info(pa, idx):
     print(pa.total_tng_contacts[idx])
     print('contact idx dem number')
     print(pa.tng_idx_dem_id[limit * idx:limit * idx + limit])
-    print('force on '+str(idx)+' is ')
+    print('force on ' + str(idx) + ' is ')
     print(pa.fx[idx])
     print(pa.fy[idx])
     print(pa.fz[idx])
@@ -113,6 +114,37 @@ def are_in_contact(pa_d, pa_s, d_idx, s_idx):
 def excute_sph_equation(pa_arrays, eq, dim=2):
     from pysph.tools.sph_evaluator import SPHEvaluator
     kernel = CubicSpline(dim=dim)
-    seval = SPHEvaluator(arrays=pa_arrays, equations=eq,
-                         dim=dim, kernel=kernel)
+    seval = SPHEvaluator(arrays=pa_arrays, equations=eq, dim=dim,
+                         kernel=kernel)
     seval.evaluate(0, 1e-3)
+
+
+def print_tang_output(output_folder, name, ti, tf):
+    """
+    Usage
+
+    print_tang_output('ball_slipping_surface_output', 'sand', 2.5, 2.5001)
+    print_tang_output('ball_slipping_surface_output', 'sand', 2.002, 2.004)
+    """
+    files = get_files(output_folder)
+    for sd, arrays in iter_output(files):
+        sand = arrays[name]
+        t = sd['t']
+        if t > ti and t < tf:
+            print("time is ", t)
+            print(sand.tng_x[0], sand.tng_y[0], sand.tng_z[0])
+
+
+def print_variable_name(output_folder, particle_arr_name, variable_name, idx,
+                        ti, tf):
+    """
+    Usage
+
+    """
+    files = get_files(output_folder)
+    for sd, arrays in iter_output(files):
+        pa = arrays[particle_arr_name]
+        t = sd['t']
+        if t > ti and t < tf:
+            print("time is ", t)
+            print(pa.x[idx])
