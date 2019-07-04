@@ -275,6 +275,10 @@ class ParticleArrayHelper(HasTraits):
     formula = Str('', enter_set=True, auto_set=False,
                   desc='formula to use for scalar (you may use np/numpy)')
 
+    # Variables to plot
+    t_vs_x = Str('', enter_set=True, auto_set=False,
+                 desc='plot x vs t')
+
     # Scalar range to use.
     range = Str('', enter_set=True, auto_set=False,
                 desc='scalar range to display (enter a tuple)')
@@ -365,6 +369,7 @@ class ParticleArrayHelper(HasTraits):
                     Item(name='show_time', label='Time'),
                     Item(name='component', enabled_when='stride > 1'),
                     Item(name='formula'),
+                    Item(name='t_vs_x'),
                     Item(name='range'),
                     Item(name='point_size'),
                     Item(name='opacity'),
