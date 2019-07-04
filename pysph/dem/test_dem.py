@@ -148,3 +148,21 @@ def print_variable_name(output_folder, particle_arr_name, variable_name, idx,
         if t > ti and t < tf:
             print("time is ", t)
             print(pa.x[idx])
+
+
+def plot_a_vs_time(output_folder, particle_arr_name, a, ti, tf):
+    """
+    Usage
+
+    """
+    import matplotlib.pyplot as plt
+    files = get_files(output_folder)
+    t_arr = []
+    a_arr = []
+    for sd, arrays in iter_output(files):
+        pa = arrays[particle_arr_name]
+        t_arr.append(sd['t'])
+        a_arr.append(pa.u[0])
+
+    plt.plot(t_arr, a_arr)
+    plt.show()

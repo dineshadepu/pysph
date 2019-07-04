@@ -894,6 +894,8 @@ class LinearPWFDEMNoRotationStage1(Equation):
 
                 # compute the damping constants
                 eta_t = 0.5 * eta_n
+                # eta_t = 0.0
+
 
                 # find the tangential force from the tangential
                 # displacement and tangential velocity (eq 2.11 Thesis Ye)
@@ -1095,6 +1097,7 @@ class LinearPWFDEMNoRotationStage2(Equation):
                 if found == 1:
                     # compute the damping constants
                     eta_t = 0.5 * eta_n
+                    # eta_t = 0.0
 
                     # find the tangential force from the tangential
                     # displacement and tangential velocity (eq 2.11 Thesis Ye)

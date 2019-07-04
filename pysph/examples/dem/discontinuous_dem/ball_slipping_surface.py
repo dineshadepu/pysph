@@ -30,8 +30,8 @@ class BallSlipping(Application):
         self.dx = 0.05
         self.dt = 1e-4
         self.pfreq = 100
-        self.wall_time = 5.
-        self.debug_time = 0.02
+        self.wall_time = 5
+        self.debug_time = 0.0
         self.tf = self.wall_time + self.debug_time
         self.dim = 2
         self.en = 0.5
@@ -43,6 +43,7 @@ class BallSlipping(Application):
         self.radius = 0.1
         self.slow_pfreq = 1
         self.slow_dt = 1e-4
+        self.post_u = None
 
     def create_particles(self):
         # wall
@@ -57,7 +58,7 @@ class BallSlipping(Application):
 
         # create a particle
         xp = np.array([0.])
-        yp = np.array([self.radius+1.])
+        yp = np.array([self.radius+0.2])
         u = np.array([1.])
         rho = 2600
         m = rho * 4. / 3. * np.pi * self.radius**3
@@ -155,9 +156,12 @@ class BallSlipping(Application):
         # once it settles down
         T = self.wall_time
         if (T - dt / 2) < t < (T + dt / 2):
-            # for pa in self.particles:
-            #     if pa.name == 'sand':
-            #         pa.u[0] = 1.
+            for pa in self.particles:
+                if pa.name == 'sand':
+                    if self.post_u is None:
+                        pass
+                    else:
+                        pa.u[0] = self.post_u
             solver.dt = self.slow_dt
             solver.set_print_freq(self.slow_pfreq)
 
