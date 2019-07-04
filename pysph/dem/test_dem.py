@@ -119,7 +119,7 @@ def excute_sph_equation(pa_arrays, eq, dim=2):
     seval.evaluate(0, 1e-3)
 
 
-def print_tang_output(output_folder, name, ti, tf):
+def print_tang_output(output_folder, name, idx, ti, tf):
     """
     Usage
 
@@ -132,7 +132,7 @@ def print_tang_output(output_folder, name, ti, tf):
         t = sd['t']
         if t > ti and t < tf:
             print("time is ", t)
-            print(sand.tng_x[0], sand.tng_y[0], sand.tng_z[0])
+            print(sand.tng_x[idx], sand.tng_y[idx], sand.tng_z[idx])
 
 
 def print_variable_name(output_folder, particle_arr_name, variable_name, idx,
@@ -162,7 +162,7 @@ def plot_a_vs_time(output_folder, particle_arr_name, a, ti, tf):
     for sd, arrays in iter_output(files):
         pa = arrays[particle_arr_name]
         t_arr.append(sd['t'])
-        a_arr.append(pa.u[0])
+        a_arr.append(getattr(pa, a)[0])
 
     plt.plot(t_arr, a_arr)
     plt.show()

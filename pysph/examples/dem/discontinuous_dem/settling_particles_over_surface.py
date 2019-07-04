@@ -38,21 +38,26 @@ class SettlingParticles(Application):
     def initialize(self):
         self.dx = 0.05
         self.dt = 1e-4
-        self.tf = 2
+        self.tf = 5
         self.dim = 2
         self.en = 0.1
-        self.kn = 1e6
+        self.kn = 1e5
         # friction coefficient
         self.mu = 0.5
         self.gy = -9.81
         self.seval = None
 
     def create_particles(self):
-        # wall
-        xw_a = np.array([0.])
-        yw_a = np.array([0.])
-        nxw_a = np.array([0])
-        nyw_a = np.array([1.])
+        # single wall
+        # xw_a = np.array([0.])
+        # yw_a = np.array([0.])
+        # nxw_a = np.array([0])
+        # nyw_a = np.array([1.])
+        # 3 wall
+        xw_a = np.array([0., 1.2, -0.2])
+        yw_a = np.array([0., 0., 0])
+        nxw_a = np.array([0, -1, 1.])
+        nyw_a = np.array([1., 0, 0])
         rho = 2699.
         wall = get_particle_array(x=xw_a, y=yw_a, nx=nxw_a, ny=nyw_a, nz=0.,
                                   rho=rho, constants={'np':
@@ -61,19 +66,19 @@ class SettlingParticles(Application):
         wall.dem_id[:] = 0
 
         # create bunch of particle
-        # xp, yp = np.mgrid[0:1.:self.dx, self.dx/2.:1.:self.dx]
-        # xp[0] -= self.dx / 8.
-        # u[:] = 0.
+        xp, yp = np.mgrid[0:1.:self.dx, self.dx/2.:1.:self.dx]
+        xp[0] -= self.dx / 8.
+        u = 0.
 
         # create 4 particles
-        dx = self.dx
-        xp = np.array([0., 2.*dx, 4.*dx, 6.*dx])
-        yp = np.ones_like(xp) * 2. * dx
-        u = np.array([1., -1., 1, -1])
+        # dx = self.dx
+        # xp = np.array([0., 2.*dx, 4.*dx, 6.*dx])
+        # yp = np.ones_like(xp) * 2. * dx
+        # u = np.array([1., -1., 1, -1])
         rad_s = np.ones_like(xp) * self.dx / 2.
         rho = 2500
-        m = rho * np.pi * rad_s**2.
-        inertia = m * 2. * rad_s / 10.
+        m = rho * rad_s**3.
+        inertia = m * 2. * rad_s**2. / 10.
         m_inverse = 1. / m
         I_inverse = 1. / inertia
         sand = get_particle_array_dem_linear(
@@ -107,9 +112,9 @@ class SettlingParticles(Application):
                     BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
                               gz=0.0),
                     LinearPWFDEMNoRotationStage1(dest='sand', sources=['wall'],
-                                                 kn=1000000.0, mu=0.5, en=0.5),
+                                                 kn=self.kn, mu=0.5, en=0.5),
                     LinearPPFDEMNoRotationStage1(dest='sand', sources=['sand'],
-                                                 kn=1000000.0, mu=0.5, en=0.5)
+                                                 kn=self.kn, mu=0.5, en=0.5)
                 ], real=False, update_nnps=False, iterate=False,
                 max_iterations=1, min_iterations=0, pre=None, post=None)
         ]
@@ -119,9 +124,9 @@ class SettlingParticles(Application):
                     BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
                               gz=0.0),
                     LinearPWFDEMNoRotationStage2(dest='sand', sources=['wall'],
-                                                 kn=1000000.0, mu=0.5, en=0.5),
+                                                 kn=self.kn, mu=0.5, en=0.5),
                     LinearPPFDEMNoRotationStage2(dest='sand', sources=['sand'],
-                                                 kn=1000000.0, mu=0.5, en=0.5)
+                                                 kn=self.kn, mu=0.5, en=0.5)
                 ], real=False, update_nnps=False, iterate=False,
                 max_iterations=1, min_iterations=0, pre=None, post=None)
         ]
