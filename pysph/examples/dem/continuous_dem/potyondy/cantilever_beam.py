@@ -40,21 +40,25 @@ class ResetForce(Equation):
 
 
 class ApplyTensionForce(Equation):
-    def __init__(self, dest, sources, fx, idx):
+    def __init__(self, dest, sources, idx, fx=0, fy=0, fz=0):
         self.fx = fx
+        self.fy = fy
+        self.fz = fz
         self.idx = idx
         super(ApplyTensionForce, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_fx, d_fy, d_fz):
         if d_idx == self.idx:
             d_fx[d_idx] = self.fx
+            d_fy[d_idx] = self.fy
+            d_fz[d_idx] = self.fz
 
 
 class CantileverBeam(Application):
     def initialize(self):
         self.dt = 1e-4
         self.pfreq = 100
-        self.wall_time = 5.
+        self.wall_time = 1.
         self.debug_time = 0.0
         self.tf = self.wall_time + self.debug_time
         self.dim = 2
@@ -96,6 +100,7 @@ class CantileverBeam(Application):
             Group(equations=[
                 BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81,
                           gz=0.0),
+                ApplyTensionForce(dest='beam', sources=None, fy=5000., idx=49),
                 PotyondyIPForceStage1(dest='beam', sources=None, kn=self.kn),
                 ResetForce(dest='beam', sources=None, x=self.radius),
             ])
@@ -104,6 +109,7 @@ class CantileverBeam(Application):
             Group(equations=[
                 BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81,
                           gz=0.0),
+                ApplyTensionForce(dest='beam', sources=None, fy=50000., idx=49),
                 PotyondyIPForceStage2(dest='beam', sources=None, kn=self.kn),
                 ResetForce(dest='beam', sources=None, x=self.radius),
             ])
