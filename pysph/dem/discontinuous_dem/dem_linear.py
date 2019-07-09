@@ -1588,7 +1588,7 @@ class UpdateTangentialContactsWallNoRotation(Equation):
                             d_tng_x[last_idx_tmp] = 0.
 
                             # swap tangential y displacement
-                            d_tng_y[k] = d_tng_x[last_idx_tmp]
+                            d_tng_y[k] = d_tng_y[last_idx_tmp]
                             d_tng_y[last_idx_tmp] = 0.
 
                             # swap tangential z displacement
@@ -1686,7 +1686,7 @@ class UpdateTangentialContactsNoRotation(Equation):
                             d_tng_x[last_idx_tmp] = 0.
 
                             # swap tangential y displacement
-                            d_tng_y[k] = d_tng_x[last_idx_tmp]
+                            d_tng_y[k] = d_tng_y[last_idx_tmp]
                             d_tng_y[last_idx_tmp] = 0.
 
                             # swap tangential z displacement
