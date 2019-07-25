@@ -173,13 +173,15 @@ class Application(object):
 
     """
 
-    def __init__(self, fname=None, domain=None):
+    def __init__(self, fname=None, output_dir=None, domain=None):
         """ Constructor
 
         Parameters
         ----------
         fname : str
             file name to use for the output files.
+        output_dir : str
+            output directory name.
         domain : pysph.base.nnps_base.DomainManager
             A domain manager to use. This is used for periodic domains etc.
         """
@@ -218,11 +220,14 @@ class Application(object):
             'none': None
         }
 
-        self.output_dir = abspath(self._get_output_dir_from_fname())
+        if output_dir is None:
+            self.output_dir = abspath(self._get_output_dir_from_fname())
+        else:
+            self.output_dir = output_dir
         self.particles = []
         self.inlet_outlet = []
         # The default value that is overridden by the command line
-        # options passed or in initializee.
+        # options passed or in initialize.
         self.cache_nnps = False
         self.iom = None
 
@@ -419,7 +424,7 @@ class Application(object):
             "--directory",
             action="store",
             dest="output_dir",
-            default=self._get_output_dir_from_fname(),
+            default=self.output_dir,
             help="Dump output in the specified directory.")
 
         # --openmp
@@ -486,7 +491,7 @@ class Application(object):
             action="store_true",
             dest="use_double",
             default=False,
-            help="Use double precision for OpenCL code.")
+            help="Use double precision for OpenCL/CUDA code.")
 
         # --kernel
         all_kernels = list_all_kernels()
@@ -497,6 +502,12 @@ class Application(object):
             default=None,
             choices=all_kernels,
             help="Use specified kernel from %s" % all_kernels)
+
+        parser.add_argument(
+            '--post-process', action="store",
+            dest="post_process", default=None,
+            help="Only perform post-processing and exit."
+        )
 
         # Restart options
         restart = parser.add_argument_group("Restart options",
@@ -791,11 +802,27 @@ class Application(object):
 
         self.options = options
 
+    def _process_command_line(self):
+        """Process the parsed command line arguments.
+
+        This method calls the scheme's ``consume_user_options`` and
+        :py:meth:`consume_user_options` as well as the
+        :py:meth:`configure_scheme`.
+
+        """
+        options = self.options
+        if options.post_process:
+            self._message('-'*70)
+            self._message('Performing post processing alone.')
+            self.post_process(options.post_process)
+            # Exit right after this so even if the user
+            # has an app.post_process call, it doesn't call it.
+            sys.exit(0)
         # save the path where we want to dump output
         self.output_dir = abspath(options.output_dir)
         mkdir(self.output_dir)
         if self.scheme is not None:
-            self.scheme.consume_user_options(self.options)
+            self.scheme.consume_user_options(options)
         self.consume_user_options()
         if self.scheme is not None:
             self.configure_scheme()
@@ -824,6 +851,7 @@ class Application(object):
             for handler in logging.root.handlers[:]:
                 logging.root.removeHandler(handler)
             lfn = os.path.join(self.output_dir, filename)
+            mkdir(self.output_dir)
             format = '%(levelname)s|%(asctime)s|%(name)s|%(message)s'
             logging.basicConfig(
                 level=level, format=format, filename=lfn, filemode='a')
@@ -918,19 +946,23 @@ class Application(object):
         if rank != 0:
             self.particles = utils.create_dummy_particles(particles_info)
 
-    def _configure_options(self):
+    def _configure_global_config(self):
         options = self.options
         # Setup configuration options.
         config = get_config()
         if options.with_openmp is not None:
             config.use_openmp = options.with_openmp
+            logger.info('Using OpenMP')
         if options.omp_schedule is not None:
             config.set_omp_schedule(options.omp_schedule)
+            logger.info('Using OpenMP schedule %s', options.omp_schedule)
 
         if options.with_opencl:
             config.use_opencl = True
+            logger.info('Using OpenCL')
         elif options.with_cuda:
             config.use_cuda = True
+            logger.info('Using CUDA')
 
         if options.with_local_memory:
             leaf_size = int(options.octree_leaf_size)
@@ -938,10 +970,9 @@ class Application(object):
             config.use_local_memory = True
         if options.use_double:
             config.use_double = options.use_double
+            logger.info('Using double precision')
         if options.profile:
             config.profile = options.profile
-        for pa in self.particles:
-            pa.update_backend()
 
     def _configure_solver(self):
         """Configures the application using the options from the
@@ -969,7 +1000,7 @@ class Application(object):
             cache = options.cache_nnps
 
             # create the NNPS object
-            if options.with_opencl:
+            if options.with_opencl or options.with_cuda:
                 if options.nnps == 'gpu_octree':
                     leaf_size = int(options.octree_leaf_size)
                     # if leaf_size % 32 != 0:
@@ -1247,7 +1278,7 @@ class Application(object):
         """Configures the application using the options from the
         command-line.
         """
-        self._configure_options()
+        self._configure_global_config()
         self._configure_solver()
 
     def _setup_parallel_manager_and_initial_load_balance(self):
@@ -1448,7 +1479,12 @@ class Application(object):
         info_dir = dirname(fname_or_dir)
         with open(fname_or_dir, 'r') as f:
             info = json.load(f)
+
+        self.args = info.get('args', self.args)
+        self._parse_command_line(force=True)
+
         self.fname = info.get('fname', self.fname)
+
         output_dir = info.get('output_dir', self.output_dir)
         if realpath(info_dir) != realpath(output_dir):
             # Happens if someone moved the directory!
@@ -1457,8 +1493,11 @@ class Application(object):
         else:
             self.output_dir = output_dir
 
-        self.args = info.get('args', self.args)
-        self._parse_command_line(force=True)
+        # Set the output directory of the options so it is corrected as per the
+        # info file.
+        self.options.output_dir = self.output_dir
+        self._process_command_line()
+
         return info
 
     def run(self, argv=None):
@@ -1471,7 +1510,9 @@ class Application(object):
             start_time = time.time()
 
             self._parse_command_line(force=argv is not None)
+            self._process_command_line()
             self._setup_logging()
+            self._configure_global_config()
 
             self.solver = self.create_solver()
             msg = "Solver is None, you may have forgotten to return it!"
@@ -1479,8 +1520,6 @@ class Application(object):
             self.equations = self.create_equations()
 
             self._create_particles(self.create_particles)
-
-            self._configure_options()
 
             # This must be done before the initial load balancing
             # as the inlets will create new particles.
@@ -1572,12 +1611,12 @@ class Application(object):
         self.equations = equations
         solver.get_options(self.arg_parse)
         self._parse_command_line()
+        self._process_command_line()
         self._setup_logging()
+        self._configure_global_config()
 
         # Create particles either from scratch or restart
         self._create_particles(particle_factory, *args, **kwargs)
-
-        self._configure_options()
 
         # This must be done before the initial load balancing
         # as the inlets will create new particles.

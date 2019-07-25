@@ -17,85 +17,6 @@ import pysph.base.particle_array
 logger = logging.getLogger()
 
 
-minmax_tpl = """//CL//
-
-    ${dtype} mmc_neutral()
-    {
-        ${dtype} result;
-
-        % for prop in prop_names:
-        % if not only_max:
-        result.cur_min_${prop} = INFINITY;
-        % endif
-        % if not only_min:
-        result.cur_max_${prop} = -INFINITY;
-        % endif
-        % endfor
-
-        return result;
-    }
-
-    ${dtype} mmc_from_scalar(${args})
-    {
-        ${dtype} result;
-
-        % for prop in prop_names:
-        % if not only_max:
-        result.cur_min_${prop} = ${prop};
-        % endif
-        % if not only_min:
-        result.cur_max_${prop} = ${prop};
-        % endif
-        % endfor
-
-        return result;
-    }
-
-    ${dtype} agg_mmc(${dtype} a, ${dtype} b)
-    {
-        ${dtype} result = a;
-
-        % for prop in prop_names:
-        % if not only_max:
-        if (b.cur_min_${prop} < result.cur_min_${prop})
-            result.cur_min_${prop} = b.cur_min_${prop};
-        % endif
-        % if not only_min:
-        if (b.cur_max_${prop} > result.cur_max_${prop})
-            result.cur_max_${prop} = b.cur_max_${prop};
-        % endif
-        % endfor
-
-        return result;
-    }
-
-    """
-
-
-def minmax_collector_key(device, dtype, props, name, *args):
-    return (device, dtype, tuple(props), name)
-
-
-@memoize(key=minmax_collector_key)
-def make_collector_dtype(device, dtype, props, name, only_min, only_max):
-    fields = [("pad", np.int32)]
-
-    for prop in props:
-        if not only_min:
-            fields.append(("cur_max_%s" % prop, dtype))
-        if not only_max:
-            fields.append(("cur_min_%s" % prop, dtype))
-
-    custom_dtype = np.dtype(fields)
-
-    from pyopencl.tools import get_or_register_dtype, match_dtype_to_c_struct
-
-    custom_dtype, c_decl = match_dtype_to_c_struct(device, name, custom_dtype)
-    custom_dtype = get_or_register_dtype(name, custom_dtype)
-
-    return custom_dtype, c_decl
-
-
 class ExtractParticles(Template):
     def __init__(self, name, prop_names):
         super(ExtractParticles, self).__init__(name=name)
@@ -111,13 +32,14 @@ class ExtractParticles(Template):
 
     def template(self, i, indices, start_idx):
         '''
-        idx, s_idx, s_i, j = declare('int', 4)
+        idx, s_idx, s_i, j, start = declare('int', 5)
         idx = indices[i]
         % for prop in obj.prop_names:
         s_idx = stride_${prop} * idx
         s_i = stride_${prop} * i
+        start = stride_${prop} * start_idx
         for j in range(stride_${prop}):
-            dst_${prop}[start_idx + s_i + j] = src_${prop}[s_idx + j]
+            dst_${prop}[start + s_i + j] = src_${prop}[s_idx + j]
         % endfor
         '''
 
@@ -140,6 +62,7 @@ class DeviceHelper(object):
         self._data = {}
         self.properties = []
         self.constants = []
+        self._strided_indices_knl = None
 
         for prop, ary in pa.properties.items():
             self.add_prop(prop, ary)
@@ -187,10 +110,36 @@ class DeviceHelper(object):
         '''
         if not isinstance(indices, dict):
             indices = {1: indices}
+            self._make_strided_indices(indices)
+
         for prop in self.properties:
             stride = self._particle_array.stride.get(prop, 1)
             self._data[prop] = self._data[prop].align(indices.get(stride))
             setattr(self, prop, self._data[prop])
+
+    def _make_strided_indices(self, indices_dict):
+        '''Takes the indices in a dict assuming that the indices are for a
+        stride of 1 and makes suitable indices for other possible stride
+        values.
+        '''
+        indices = indices_dict[1]
+        n = indices.length
+        if not self._strided_indices_knl:
+            self._setup_strided_indices_kernel()
+        for stride in set(self._particle_array.stride.values()):
+            dest = array.empty(n*stride, dtype=np.int32, backend=self.backend)
+            self._strided_indices_knl(indices, dest, stride)
+            indices_dict[stride] = dest
+
+    def _setup_strided_indices_kernel(self):
+        @annotate(int='i, stride', gintp='indices, dest')
+        def set_indices(i, indices, dest, stride):
+            j = declare('int')
+            for j in range(stride):
+                dest[i*stride + j] = indices[i]*stride + j
+
+        knl = Elementwise(set_indices, backend=self.backend)
+        self._strided_indices_knl = knl
 
     def add_prop(self, name, carray):
         """Add a new property given the name and carray, note
@@ -236,73 +185,10 @@ class DeviceHelper(object):
         return float(array.maximum(getattr(self, arg),
                                    backend=self.backend))
 
-    @memoize(key=lambda *args: (args[-2], args[-1]))
-    def _get_minmax_kernel(self, ctx, dtype, mmc_dtype, prop_names,
-                           only_min, only_max, name, mmc_c_decl):
-        tpl_args = ", ".join(
-            ["%(dtype)s %(prop)s" % {'dtype': dtype, 'prop': prop}
-                for prop in prop_names]
-        )
-
-        mmc_preamble = mmc_c_decl + minmax_tpl
-        preamble = mkt.Template(text=mmc_preamble).render(
-            args=tpl_args, prop_names=prop_names, dtype=name,
-            only_min=only_min, only_max=only_max
-        )
-
-        knl_args = ", ".join(
-            ["__global %(dtype)s *%(prop)s" % {'dtype': dtype, 'prop': prop}
-                for prop in prop_names]
-        )
-
-        map_args = ", ".join(
-            ["%(prop)s[i]" % {'dtype': dtype, 'prop': prop}
-                for prop in prop_names]
-        )
-
-        from pyopencl.reduction import ReductionKernel
-
-        knl = ReductionKernel(
-            ctx, mmc_dtype, neutral="mmc_neutral()",
-            reduce_expr="agg_mmc(a, b)",
-            map_expr="mmc_from_scalar(%s)" % map_args,
-            arguments=knl_args,
-            preamble=preamble
-        )
-
-        return knl
-
     def update_minmax_cl(self, props, only_min=False, only_max=False):
-        if self.backend != 'opencl':
-            raise ValueError('''Optimized minmax update only supported
-                             using opencl backend''')
-        if only_min and only_max:
-            raise ValueError("Only one of only_min and only_max can be True")
-
-        dtype = 'double' if self.use_double else 'float'
-        op = 'min' if not only_max else ''
-        op += 'max' if not only_min else ''
-        name = "%s_collector_%s" % (op, ''.join([dtype] + props))
-
-        from compyle.opencl import get_context
-        ctx = get_context()
-
-        mmc_dtype, mmc_c_decl = make_collector_dtype(ctx.devices[0],
-                                                     self._dtype, props, name,
-                                                     only_min, only_max)
-        knl = self._get_minmax_kernel(ctx, dtype, mmc_dtype, props,
-                                      only_min, only_max, name, mmc_c_decl)
-
-        args = [getattr(self, prop).dev for prop in props]
-
-        result = knl(*args).get()
-
-        for prop in props:
-            proparr = self._data[prop]
-            if not only_max:
-                proparr.minimum = result["cur_min_%s" % prop]
-            if not only_min:
-                proparr.maximum = result["cur_max_%s" % prop]
+        ary_list = [getattr(self, prop) for prop in props]
+        array.update_minmax_gpu(ary_list, only_min=only_min,
+                                only_max=only_max, backend=self.backend)
 
     def update_min_max(self, props=None):
         """Update the min,max values of all properties """
@@ -701,7 +587,9 @@ class DeviceHelper(object):
         else:
             prop_names = props
 
-        result_array = pysph.base.particle_array.ParticleArray()
+        result_array = pysph.base.particle_array.ParticleArray(
+            backend=self._particle_array.backend
+        )
         result_array.set_name(self._particle_array.name)
         result_array.set_device_helper(DeviceHelper(result_array,
                                                     backend=self.backend))
