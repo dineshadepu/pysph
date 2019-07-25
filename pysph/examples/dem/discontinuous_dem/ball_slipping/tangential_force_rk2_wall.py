@@ -6,14 +6,15 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
+from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage, EuleIntegratorMultiStage
 from pysph.sph.rigid_body import BodyForce
 from pysph.dem.discontinuous_dem.dem_linear import (
     get_particle_array_dem_linear, LinearDEMNoRotationScheme,
-    UpdateTangentialContactsNoRotation, LinearPWFDEMNoRotationStage1,
+    UpdateTangentialContactsNoRotation, LPWTFNRE,
     LinearPWFDEMNoRotationStage2, RK2StepLinearDEMNoRotation,
     UpdateTangentialContactsWallNoRotation, LinearPPFDEMNoRotationStage1,
-    LinearPPFDEMNoRotationStage2, RK2StepLinearDEMNoRotation)
+    LinearPPFDEMNoRotationStage2, EulerStepLinearDEMNoRotation,
+    LPWTFNRRK2S1, LPWTFNRRK2S2)
 from pysph.sph.scheme import SchemeChooser
 from pysph.base.utils import get_particle_array_rigid_body
 from pysph.base.utils import get_particle_array
@@ -30,8 +31,8 @@ class BallSlipping(Application):
         self.dx = 0.05
         self.dt = 1e-4
         self.pfreq = 100
-        self.wall_time = 5
-        self.debug_time = 0.0
+        self.wall_time = 3
+        self.debug_time = 2.0
         self.tf = self.wall_time + self.debug_time
         self.dim = 2
         self.en = 0.5
@@ -41,9 +42,9 @@ class BallSlipping(Application):
         self.gy = -9.81
         self.seval = None
         self.radius = 0.1
-        self.slow_pfreq = 1
+        self.slow_pfreq = 100
         self.slow_dt = 1e-4
-        self.post_u = None
+        self.post_u = 2.
 
     def create_particles(self):
         # wall
@@ -58,7 +59,7 @@ class BallSlipping(Application):
 
         # create a particle
         xp = np.array([0.])
-        yp = np.array([self.radius + 0.2])
+        yp = np.array([self.radius+0.2])
         u = np.array([1.])
         rho = 2600
         m = rho * 4. / 3. * np.pi * self.radius**3
@@ -71,46 +72,21 @@ class BallSlipping(Application):
 
         return [wall, sand]
 
-    # def create_scheme(self):
-    #     ldems = LinearDEMNoRotationScheme(
-    #         dem_bodies=['sand'], rigid_bodies=None, solids=None, walls=[
-    #             'wall'
-    #         ], dim=self.dim, kn=self.kn, mu=self.mu, en=self.en, gy=self.gy)
-    #     s = SchemeChooser(default='ldems', ldems=ldems)
-    #     return s
-
-    # def configure_scheme(self):
-    #     scheme = self.scheme
-    #     kernel = CubicSpline(dim=self.dim)
-    #     tf = self.tf
-    #     dt = self.dt
-    #     scheme.configure()
-    #     scheme.configure_solver(kernel=kernel,
-    #                             integrator_cls=EPECIntegratorMultiStage, dt=dt,
-    #                             tf=tf, pfreq=self.pfreq)
-
     def create_equations(self):
         eq1 = [
-            Group(
-                equations=[
-                    BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
-                              gz=0.0),
-                    LinearPWFDEMNoRotationStage1(dest='sand', sources=['wall'],
-                                                 kn=self.kn, mu=0.5,
-                                                 en=self.en),
-                ], real=False, update_nnps=False, iterate=False,
-                max_iterations=1, min_iterations=0, pre=None, post=None)
+            Group(equations=[
+                BodyForce(dest='sand', sources=None, gy=-9.81),
+                LPWTFNRRK2S1(dest='sand', sources=['wall'],
+                             kn=self.kn, en=0.5),
+            ])
         ]
+
         eq2 = [
-            Group(
-                equations=[
-                    BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
-                              gz=0.0),
-                    LinearPWFDEMNoRotationStage2(dest='sand', sources=['wall'],
-                                                 kn=self.kn, mu=0.5,
-                                                 en=self.en),
-                ], real=False, update_nnps=False, iterate=False,
-                max_iterations=1, min_iterations=0, pre=None, post=None)
+            Group(equations=[
+                BodyForce(dest='sand', sources=None, gy=-9.81),
+                LPWTFNRRK2S2(dest='sand', sources=['wall'],
+                             kn=self.kn, en=0.5),
+            ])
         ]
 
         return MultiStageEquations([eq1, eq2])
@@ -125,7 +101,6 @@ class BallSlipping(Application):
         tf = self.tf
         solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
                         dt=dt, tf=tf)
-        solver.set_disable_output(True)
         return solver
 
     def _make_accel_eval(self, equations, pa_arrays):

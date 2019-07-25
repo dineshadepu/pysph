@@ -6,14 +6,16 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
+from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage, EuleIntegratorMultiStage
 from pysph.sph.rigid_body import BodyForce
 from pysph.dem.discontinuous_dem.dem_linear import (
-    get_particle_array_dem_linear, LPPNFNR, LinearDEMNoRotationScheme,
+    get_particle_array_dem_linear, LPPNFNR, LPPTFNRE,
+    LinearDEMNoRotationScheme,
     UpdateTangentialContactsNoRotation, LinearPWFDEMNoRotationStage1,
     LinearPWFDEMNoRotationStage2, RK2StepLinearDEMNoRotation,
     UpdateTangentialContactsWallNoRotation, LinearPPFDEMNoRotationStage1,
-    LinearPPFDEMNoRotationStage2)
+    LinearPPFDEMNoRotationStage2, EulerStepLinearDEMNoRotation)
+from pysph.sph.integrator import EulerIntegrator
 from pysph.sph.scheme import SchemeChooser
 from pysph.base.utils import get_particle_array_rigid_body
 from pysph.base.utils import get_particle_array
@@ -113,32 +115,34 @@ class ParticlesinGlass2d(Application):
         eq1 = [
             Group(equations=[
                 BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81, gz=0.0),
-                LPPNFNR(dest='sand', sources=['wall', 'sand', 'glass'],
-                        kn=self.kn, en=0.5),
+                LPPTFNRE(dest='sand', sources=['wall', 'sand', 'glass'],
+                         kn=self.kn, en=0.5),
             ])
         ]
-        eq2 = [
-            Group(equations=[
-                BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81, gz=0.0),
-                LPPNFNR(dest='sand', sources=['wall', 'sand', 'glass'],
-                        kn=self.kn, en=0.5),
-            ])
-        ]
-
-        return MultiStageEquations([eq1, eq2])
+        return eq1
 
     def create_solver(self):
         kernel = CubicSpline(dim=self.dim)
 
-        integrator = EPECIntegratorMultiStage(
-            sand=RK2StepLinearDEMNoRotation())
+        integrator = EuleIntegratorMultiStage(
+            sand=EulerStepLinearDEMNoRotation())
 
         dt = self.dt
         tf = self.tf
         solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
                         dt=dt, tf=tf)
-        solver.set_disable_output(True)
         return solver
+
+    def _make_accel_eval(self, equations, pa_arrays):
+        from pysph.tools.sph_evaluator import SPHEvaluator
+        if self.seval is None:
+            kernel = CubicSpline(dim=self.dim)
+            seval = SPHEvaluator(arrays=pa_arrays, equations=equations,
+                                 dim=self.dim, kernel=kernel)
+            self.seval = seval
+            return self.seval
+        else:
+            return self.seval
 
     def post_step(self, solver):
         t = solver.t
@@ -148,6 +152,19 @@ class ParticlesinGlass2d(Application):
             for pa in self.particles:
                 if pa.name == 'glass':
                     pa.y += self.dx * 40
+
+        eqs1 = [
+            Group(equations=[
+                UpdateTangentialContactsNoRotation(dest='sand',
+                                                   sources=['sand', 'wall',
+                                                            'glass'])
+            ])
+        ]
+        arrays = self.particles
+        a_eval = self._make_accel_eval(eqs1, arrays)
+
+        # When
+        a_eval.evaluate(t, dt)
 
 
 if __name__ == '__main__':
