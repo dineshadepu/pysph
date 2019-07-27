@@ -1548,9 +1548,7 @@ def get_particle_array_rigid_body_dem(constants=None, **props):
 class RK2StepRigidBodyDEM(IntegratorStep):
     def initialize(self, d_idx, d_x, d_y, d_z, d_x0, d_y0, d_z0, d_omega,
                    d_omega0, d_vc, d_vc0, d_num_body, d_total_tng_contacts,
-                   d_limit, d_tng_x, d_tng_y, d_tng_z, d_tng_x0, d_tng_y0,
-                   d_tng_z0, d_tng_nx, d_tng_ny, d_tng_nz, d_tng_nx0,
-                   d_tng_ny0, d_tng_nz0):
+                   d_limit, d_tng_frc, d_tng_frc0):
         _i = declare('int')
         _j = declare('int')
         base = declare('int')
@@ -1577,17 +1575,11 @@ class RK2StepRigidBodyDEM(IntegratorStep):
         q = p + tot_ctcs
 
         for i in range(p, q):
-            d_tng_x0[i] = d_tng_x[i]
-            d_tng_y0[i] = d_tng_y[i]
-            d_tng_z0[i] = d_tng_z[i]
-            d_tng_nx0[i] = d_tng_nx[i]
-            d_tng_ny0[i] = d_tng_ny[i]
-            d_tng_nz0[i] = d_tng_nz[i]
+            d_tng_frc0[i] = d_tng_frc[i]
 
     def stage1(self, d_idx, d_u, d_v, d_w, d_x, d_y, d_z, d_x0, d_y0, d_z0,
                d_omega, d_omega_dot, d_vc, d_ac, d_omega0, d_vc0, d_num_body,
-               d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
-               d_vtx, d_vty, d_vtz, dt=0.0):
+               d_total_tng_contacts, d_limit, dt=0.0):
         dtb2 = 0.5*dt
         _i = declare('int')
         j = declare('int')
@@ -1604,26 +1596,9 @@ class RK2StepRigidBodyDEM(IntegratorStep):
         d_y[d_idx] = d_y0[d_idx] + dtb2*d_v[d_idx]
         d_z[d_idx] = d_z0[d_idx] + dtb2*d_w[d_idx]
 
-        # --------------------------------------
-        # increment the tangential displacement
-        # --------------------------------------
-        i = declare('int')
-        p = declare('int')
-        q = declare('int')
-        tot_ctcs = declare('int')
-        tot_ctcs = d_total_tng_contacts[d_idx]
-        p = d_idx * d_limit[0]
-        q = p + tot_ctcs
-
-        for i in range(p, q):
-            d_tng_x[i] += d_vtx[i] * dtb2
-            d_tng_y[i] += d_vty[i] * dtb2
-            d_tng_z[i] += d_vtz[i] * dtb2
-
     def stage2(self, d_idx, d_u, d_v, d_w, d_x, d_y, d_z, d_x0, d_y0, d_z0,
                d_omega, d_omega_dot, d_vc, d_ac, d_omega0, d_vc0, d_num_body,
-               d_total_tng_contacts, d_limit, d_tng_x, d_tng_y, d_tng_z,
-               d_tng_x0, d_tng_y0, d_tng_z0, d_vtx, d_vty, d_vtz, dt=0.0):
+               d_total_tng_contacts, d_limit, dt=0.0):
         _i = declare('int')
         j = declare('int')
         base = declare('int')
@@ -1638,22 +1613,6 @@ class RK2StepRigidBodyDEM(IntegratorStep):
         d_x[d_idx] = d_x0[d_idx] + dt*d_u[d_idx]
         d_y[d_idx] = d_y0[d_idx] + dt*d_v[d_idx]
         d_z[d_idx] = d_z0[d_idx] + dt*d_w[d_idx]
-
-        # --------------------------------------
-        # increment the tangential displacement
-        # --------------------------------------
-        i = declare('int')
-        p = declare('int')
-        q = declare('int')
-        tot_ctcs = declare('int')
-        tot_ctcs = d_total_tng_contacts[d_idx]
-        p = d_idx * d_limit[0]
-        q = p + tot_ctcs
-
-        for i in range(p, q):
-            d_tng_x[i] = d_tng_x0[i] + d_vtx[i] * dt
-            d_tng_y[i] = d_tng_y0[i] + d_vty[i] * dt
-            d_tng_z[i] = d_tng_z0[i] + d_vtz[i] * dt
 
 
 class RigidBodySimpleScheme(Scheme):
