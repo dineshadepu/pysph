@@ -6,7 +6,7 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage, EuleIntegratorMultiStage
+from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage, EulerIntegratorMultiStage
 from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
     get_particle_array_dem_2d_linear_cundall, BodyForce, Cundall2dForceStage1,
     Cundall2dForceStage2, Cundall2dForceEuler,
@@ -117,7 +117,7 @@ class ParticlesinGlass2d(Application):
     def create_solver(self):
         kernel = CubicSpline(dim=self.dim)
 
-        integrator = EuleIntegratorMultiStage(sand=EulerStepDEM2dCundall())
+        integrator = EulerIntegratorMultiStage(sand=EulerStepDEM2dCundall())
 
         dt = self.dt
         tf = self.tf

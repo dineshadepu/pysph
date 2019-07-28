@@ -7,7 +7,7 @@ from math import sqrt, asin, sin, cos, pi, log
 from pysph.sph.scheme import Scheme
 
 
-class EuleIntegratorMultiStage(Integrator):
+class EulerIntegratorMultiStage(Integrator):
     def one_timestep(self, t, dt):
         self.compute_accelerations(0, update_nnps=True)
 

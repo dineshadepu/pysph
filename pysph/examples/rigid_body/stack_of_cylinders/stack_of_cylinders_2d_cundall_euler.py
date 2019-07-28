@@ -19,11 +19,11 @@ from pysph.tools.sph_evaluator import SPHEvaluator
 
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
+from pysph.dem.discontinuous_dem.dem_nonlinear import EuleIntegratorMultiStage
 from pysph.sph.rigid_body import (RigidBodyMoments, RigidBodyMotion,
                                   RK2StepRigidBodyDEM, BodyForce)
 from pysph.sph.rigid_body_cundall import (
-    get_particle_array_rigid_body_cundall,
+    get_particle_array_rigid_body_cundall, RigidBodyCollision2DCundallEuler,
     RigidBodyCollision2DCundallStage1, RigidBodyCollision2DCundallStage2,
     UpdateTangentialContactsCundall2d)
 from pysph.tools.geometry import (get_2d_tank)
@@ -218,7 +218,7 @@ class ZhangStackOfCylinders(Application):
                     BodyForce(dest='cylinders', sources=None, gy=-9.81),
                 ], real=False),
             Group(equations=[
-                RigidBodyCollision2DCundallStage1(
+                RigidBodyCollision2DCundallEuler(
                     dest='cylinders', sources=['dam', 'wall', 'cylinders'],
                     kn=1e7, en=0.5, mu=0.3),
             ]),
@@ -226,27 +226,12 @@ class ZhangStackOfCylinders(Application):
                 equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
             Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
         ]
-
-        stage2 = [
-            Group(
-                equations=[
-                    BodyForce(dest='cylinders', sources=None, gy=-9.81),
-                ], real=False),
-            Group(equations=[
-                RigidBodyCollision2DCundallStage2(
-                    dest='cylinders', sources=['dam', 'wall', 'cylinders'],
-                    kn=1e7, en=0.5, mu=0.3),
-            ]),
-            Group(
-                equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
-        ]
-        return MultiStageEquations([stage1, stage2])
+        return stage1
 
     def create_solver(self):
         kernel = CubicSpline(dim=2)
 
-        integrator = EPECIntegratorMultiStage(cylinders=RK2StepRigidBodyDEM())
+        integrator = EuleIntegratorMultiStage(cylinders=RK2StepRigidBodyDEM())
 
         dt = self.dt
         print("DT: %s" % dt)

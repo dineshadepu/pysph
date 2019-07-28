@@ -6,7 +6,7 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage, EuleIntegratorMultiStage
+from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage, EulerIntegratorMultiStage
 from pysph.sph.rigid_body import BodyForce
 from pysph.dem.discontinuous_dem.dem_linear import (
     get_particle_array_dem_linear, LinearDEMNoRotationScheme,
