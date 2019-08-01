@@ -52,7 +52,7 @@ def get_particle_array_dem_3d_linear_cundall(constants=None, **props):
         'x', 'y', 'z', 'u', 'v', 'w', 'm', 'pid', 'tag', 'gid', 'fx', 'fy',
         'fz', 'torx', 'tory', 'torz', 'I_inverse', 'm_inverse', 'rad_s',
         'dem_id', 'tng_idx', 'tng_idx_dem_id', 'total_tng_contacts', 'tng_fx',
-        'tng_fy', 'tng_fz'
+        'tng_fy', 'tng_fz', 'wx', 'wy', 'wz'
     ])
 
     return pa
@@ -106,7 +106,7 @@ class Cundall3dForceEuler(Equation):
              d_tng_idx_dem_id, d_tng_fx, d_tng_fy, d_tng_fz, d_tng_fx0,
              d_tng_fy0, d_tng_fz0, d_total_tng_contacts, d_dem_id, d_limit,
              d_torx, d_tory, d_torz, VIJ, XIJ, RIJ, d_rad_s, s_idx, s_m, s_wx,
-             s_wy, s_wz, s_rad_s, s_dem_id, dt):
+             s_wy, s_wz, s_rad_s, s_dem_id, dt, t):
         p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
         overlap = -1.
 
@@ -227,12 +227,17 @@ class Cundall3dForceEuler(Equation):
                     one_by_ftp_magn = 1. / ftp_magn
 
                     tx = ft_px * one_by_ftp_magn
-                    ty = ft_px * one_by_ftp_magn
-                    tz = ft_px * one_by_ftp_magn
+                    ty = ft_py * one_by_ftp_magn
+                    tz = ft_pz * one_by_ftp_magn
                 else:
-                    tx = -vt_x / vt_magn
-                    ty = -vt_y / vt_magn
-                    tz = -vt_z / vt_magn
+                    if vt_magn > 0.:
+                        tx = -vt_x / vt_magn
+                        ty = -vt_y / vt_magn
+                        tz = -vt_z / vt_magn
+                    else:
+                        tx = 0.
+                        ty = 0.
+                        tz = 0.
 
                 # rescale the projection by the magnitude of the
                 # previous tangential force, which gives the tangential
@@ -435,12 +440,17 @@ class Cundall3dForceStage1(Equation):
                     one_by_ftp_magn = 1. / ftp_magn
 
                     tx = ft_px * one_by_ftp_magn
-                    ty = ft_px * one_by_ftp_magn
-                    tz = ft_px * one_by_ftp_magn
+                    ty = ft_py * one_by_ftp_magn
+                    tz = ft_pz * one_by_ftp_magn
                 else:
-                    tx = -vt_x / vt_magn
-                    ty = -vt_y / vt_magn
-                    tz = -vt_z / vt_magn
+                    if vt_magn > 0.:
+                        tx = -vt_x / vt_magn
+                        ty = -vt_y / vt_magn
+                        tz = -vt_z / vt_magn
+                    else:
+                        tx = 0.
+                        ty = 0.
+                        tz = 0.
 
                 # rescale the projection by the magnitude of the
                 # previous tangential force, which gives the tangential
@@ -643,9 +653,14 @@ class Cundall3dForceStage2(Equation):
                     ty = ft_px * one_by_ftp_magn
                     tz = ft_px * one_by_ftp_magn
                 else:
-                    tx = -vt_x / vt_magn
-                    ty = -vt_y / vt_magn
-                    tz = -vt_z / vt_magn
+                    if vt_magn > 0.:
+                        tx = -vt_x / vt_magn
+                        ty = -vt_y / vt_magn
+                        tz = -vt_z / vt_magn
+                    else:
+                        tx = 0.
+                        ty = 0.
+                        tz = 0.
 
                 # rescale the projection by the magnitude of the
                 # previous tangential force, which gives the tangential
@@ -701,8 +716,8 @@ class Cundall3dForceStage2(Equation):
                     one_by_ft0_p_magn = 1. / ft0_p_magn
 
                     tx = ft_px * one_by_ft0_p_magn
-                    ty = ft_px * one_by_ft0_p_magn
-                    tz = ft_px * one_by_ft0_p_magn
+                    ty = ft_py * one_by_ft0_p_magn
+                    tz = ft_pz * one_by_ft0_p_magn
                 else:
                     tx = -vt_x / vt_magn
                     ty = -vt_y / vt_magn
@@ -715,10 +730,10 @@ class Cundall3dForceStage2(Equation):
                 d_tng_fy0[found_at] = ft0_magn * ty
                 d_tng_fz0[found_at] = ft0_magn * tz
 
-            # increment the tangential force to next time step
-            d_tng_fx[found_at] = d_tng_fx0[found_at] - self.kt * vt_x * dt
-            d_tng_fy[found_at] = d_tng_fy0[found_at] - self.kt * vt_y * dt
-            d_tng_fz[found_at] = d_tng_fz0[found_at] - self.kt * vt_z * dt
+                # increment the tangential force to next time step
+                d_tng_fx[found_at] = d_tng_fx0[found_at] - self.kt * vt_x * dt
+                d_tng_fy[found_at] = d_tng_fy0[found_at] - self.kt * vt_y * dt
+                d_tng_fz[found_at] = d_tng_fz0[found_at] - self.kt * vt_z * dt
 
             d_fx[d_idx] += fn_x + ft_x
             d_fy[d_idx] += fn_y + ft_y
@@ -904,7 +919,7 @@ class EulerStepDEM3dCundall(IntegratorStep):
 
         d_u[d_idx] = d_u[d_idx] + dt * d_fx[d_idx] * d_m_inverse[d_idx]
         d_v[d_idx] = d_v[d_idx] + dt * d_fy[d_idx] * d_m_inverse[d_idx]
-        d_w[d_idx] = d_v[d_idx] + dt * d_fz[d_idx] * d_m_inverse[d_idx]
+        d_w[d_idx] = d_w[d_idx] + dt * d_fz[d_idx] * d_m_inverse[d_idx]
 
         d_wx[d_idx] = d_wx[d_idx] + (dt * d_torx[d_idx] * d_I_inverse[d_idx])
         d_wy[d_idx] = d_wy[d_idx] + (dt * d_tory[d_idx] * d_I_inverse[d_idx])

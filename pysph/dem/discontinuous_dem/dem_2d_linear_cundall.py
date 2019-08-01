@@ -625,3 +625,113 @@ class EulerStepDEM2dCundall(IntegratorStep):
 
         d_theta_dot[d_idx] = d_theta_dot[d_idx] + (
             dt * d_torz[d_idx] * d_I_inverse[d_idx])
+
+
+class Dem2dCundallScheme(Scheme):
+    def __init__(self, bodies, solids, integrator, dim, kn, mu=0.5, en=1.0, gx=0.0,
+                 gy=0.0, debug=False):
+        self.bodies = bodies
+        self.solids = solids
+        self.dim = dim
+        self.integrator = integrator
+        self.kn = kn
+        self.mu = mu
+        self.en = en
+        self.gx = gx
+        self.gy = gy
+        self.debug = debug
+
+    def configure_solver(self, kernel=None, integrator_cls=None,
+                         extra_steppers=None, **kw):
+        from pysph.base.kernels import CubicSpline
+        from pysph.solver.solver import Solver
+        if kernel is None:
+            kernel = CubicSpline(dim=self.dim)
+
+        steppers = {}
+        if extra_steppers is not None:
+            steppers.update(extra_steppers)
+
+        if self.integrator == "rk2":
+            for body in self.bodies:
+                if body not in steppers:
+                    steppers[body] = RK2StepDEM2dCundall()
+
+            cls = integrator_cls if integrator_cls is not None else EPECIntegratorMultiStage
+        elif self.integrator == "euler":
+            for body in self.bodies:
+                if body not in steppers:
+                    steppers[body] = EulerStepDEM2dCundall()
+
+            cls = integrator_cls if integrator_cls is not None else EulerIntegratorMultiStage
+
+        integrator = cls(**steppers)
+
+        self.solver = Solver(dim=self.dim, integrator=integrator,
+                             kernel=kernel, **kw)
+
+    def get_rk2_equations(self):
+        # stage 1
+        stage1 = []
+        g1 = []
+        if self.solids is not None:
+            all = self.bodies + self.solids
+        else:
+            all = self.bodies
+
+        for name in self.bodies:
+            g1.append(
+                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy))
+
+        for name in self.bodies:
+            g1.append(
+                Cundall2dForceStage1(dest=name, sources=all, kn=self.kn,
+                                     mu=self.mu, en=self.en))
+        stage1.append(Group(equations=g1, real=False))
+
+        # stage 2
+        stage2 = []
+        g1 = []
+        if self.solids is not None:
+            all = self.bodies + self.solids
+        else:
+            all = self.bodies
+
+        for name in self.bodies:
+            g1.append(
+                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy,
+                          gz=self.gz))
+
+        for name in self.bodies:
+            g1.append(
+                Cundall2dForceStage2(dest=name, sources=all, kn=self.kn,
+                                     mu=self.mu, en=self.en))
+        stage2.append(Group(equations=g1, real=False))
+        return MultiStageEquations([stage1, stage2])
+
+    def get_euler_equations(self):
+        stage1 = []
+        g1 = []
+        if self.solids is not None:
+            all = self.bodies + self.solids
+        else:
+            all = self.bodies
+
+        for name in self.bodies:
+            g1.append(
+                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy,
+                          gz=self.gz))
+
+        for name in self.bodies:
+            g1.append(
+                Cundall2dForceEuler(dest=name, sources=all, kn=self.kn,
+                                    mu=self.mu, en=self.en))
+        stage1.append(Group(equations=g1, real=False))
+
+        return stage1
+
+    def get_equations(self):
+        if self.integrator == "rk2":
+            return self.get_rk2_equations()
+        elif self.integrator == "euler":
+            return self.get_euler_equations()
