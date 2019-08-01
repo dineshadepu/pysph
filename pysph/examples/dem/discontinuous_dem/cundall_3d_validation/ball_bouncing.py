@@ -6,12 +6,11 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
-from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
-    get_particle_array_dem_2d_linear_cundall, BodyForce, Cundall2dForceStage1,
-    Cundall2dForceStage2, UpdateTangentialContactsCundall2d,
-    RK2StepDEM2dCundall, UpdateTangentialContactsCundall2d)
-from pysph.sph.equation import Group, MultiStageEquations
+from pysph.sph.scheme import SchemeChooser
+from pysph.dem.discontinuous_dem.dem_3d_linear_cundall import (
+    get_particle_array_dem_3d_linear_cundall, Dem3dCundallScheme,
+    UpdateTangentialContactsCundall3d)
+from pysph.sph.equation import Group
 
 
 class BouncingBall(Application):
@@ -21,7 +20,7 @@ class BouncingBall(Application):
     def initialize(self):
         self.dx = 0.05
         self.dt = 1e-4
-        self.tf = 5
+        self.tf = 2
         self.dim = 2
         self.en = 0.5
         self.kn = 50000
@@ -30,6 +29,7 @@ class BouncingBall(Application):
         self.gy = -9.81
         self.seval = None
         self.radius = 0.1
+        self.pfreq = 100
 
     def create_particles(self):
         # create a particle
@@ -40,7 +40,7 @@ class BouncingBall(Application):
         I = 2. / 5. * m * self.radius**2.
         m_inverse = 1. / m
         I_inverse = 1. / I
-        sand = get_particle_array_dem_2d_linear_cundall(
+        sand = get_particle_array_dem_3d_linear_cundall(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
             rad_s=self.radius, dem_id=1, h=1.2 * self.dx / 2., name="sand")
 
@@ -52,46 +52,27 @@ class BouncingBall(Application):
         I = 2. / 5. * m * self.radius**2.
         m_inverse = 1. / m
         I_inverse = 1. / I
-        wall = get_particle_array_dem_2d_linear_cundall(
+        wall = get_particle_array_dem_3d_linear_cundall(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
             rad_s=self.radius, dem_id=1, h=1.2 * self.dx / 2., name="wall")
         return [wall, sand]
 
-    def create_equations(self):
-        eq1 = [
-            Group(
-                equations=[
-                    BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
-                              gz=0.0),
-                    Cundall2dForceStage1(dest='sand', sources=['wall'],
-                                         kn=self.kn, mu=0.5, en=self.en),
-                ], real=False, update_nnps=False, iterate=False,
-                max_iterations=1, min_iterations=0, pre=None, post=None)
-        ]
-        eq2 = [
-            Group(
-                equations=[
-                    BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
-                              gz=0.0),
-                    Cundall2dForceStage2(dest='sand', sources=['wall'],
-                                         kn=self.kn, mu=0.5, en=self.en),
-                ], real=False, update_nnps=False, iterate=False,
-                max_iterations=1, min_iterations=0, pre=None, post=None)
-        ]
+    def create_scheme(self):
+        dem3drk2 = Dem3dCundallScheme(
+            bodies=['sand'], solids=['wall'], dim=self.dim, kn=self.kn,
+            mu=self.mu, en=self.en, gy=-9.81, integrator="rk2")
+        dem3deuler = Dem3dCundallScheme(
+            bodies=['sand'], solids=['wall'], dim=self.dim, kn=self.kn,
+            mu=self.mu, en=self.en, gy=-9.81, integrator="euler")
+        s = SchemeChooser(default='dem3drk2', dem3drk2=dem3drk2,
+                          dem3deuler=dem3deuler)
+        return s
 
-        return MultiStageEquations([eq1, eq2])
-
-    def create_solver(self):
+    def configure_scheme(self):
+        scheme = self.scheme
         kernel = CubicSpline(dim=self.dim)
-
-        integrator = EPECIntegratorMultiStage(sand=RK2StepDEM2dCundall())
-
-        dt = self.dt
-        tf = self.tf
-        solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
-                        dt=dt, tf=tf)
-        solver.set_disable_output(True)
-        return solver
+        scheme.configure()
+        scheme.configure_solver(kernel=kernel, dt=self.dt, tf=self.tf, pfreq=self.pfreq)
 
     def _make_accel_eval(self, equations, pa_arrays):
         from pysph.tools.sph_evaluator import SPHEvaluator
@@ -109,7 +90,7 @@ class BouncingBall(Application):
         dt = solver.dt
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2d(dest='sand',
+                UpdateTangentialContactsCundall3d(dest='sand',
                                                   sources=['wall']),
             ])
         ]
