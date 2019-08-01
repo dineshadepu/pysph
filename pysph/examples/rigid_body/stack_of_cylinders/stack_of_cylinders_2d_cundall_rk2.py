@@ -22,7 +22,7 @@ from pysph.solver.application import Application
 from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
 from pysph.sph.rigid_body import (RigidBodyMoments, RigidBodyMotion,
                                   RK2StepRigidBodyDEM, BodyForce)
-from pysph.sph.rigid_body_cundall import (
+from pysph.sph.rigid_body_cundall_2d import (
     get_particle_array_rigid_body_cundall,
     RigidBodyCollision2DCundallStage1, RigidBodyCollision2DCundallStage2,
     UpdateTangentialContactsCundall2d)
