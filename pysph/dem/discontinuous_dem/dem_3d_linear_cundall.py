@@ -650,8 +650,8 @@ class Cundall3dForceStage2(Equation):
                     one_by_ftp_magn = 1. / ftp_magn
 
                     tx = ft_px * one_by_ftp_magn
-                    ty = ft_px * one_by_ftp_magn
-                    tz = ft_px * one_by_ftp_magn
+                    ty = ft_py * one_by_ftp_magn
+                    tz = ft_pz * one_by_ftp_magn
                 else:
                     if vt_magn > 0.:
                         tx = -vt_x / vt_magn
@@ -712,16 +712,21 @@ class Cundall3dForceStage2(Equation):
                 ft0_pz = d_tng_fz0[found_at] - ft0_dot_nij * nz
 
                 ft0_p_magn = (ft0_px**2. + ft0_py**2. + ft0_pz**2.)**0.5
-                if ftp_magn > 0:
+                if ft0_p_magn > 0:
                     one_by_ft0_p_magn = 1. / ft0_p_magn
 
-                    tx = ft_px * one_by_ft0_p_magn
-                    ty = ft_py * one_by_ft0_p_magn
-                    tz = ft_pz * one_by_ft0_p_magn
+                    tx = ft0_px * one_by_ft0_p_magn
+                    ty = ft0_py * one_by_ft0_p_magn
+                    tz = ft0_pz * one_by_ft0_p_magn
                 else:
-                    tx = -vt_x / vt_magn
-                    ty = -vt_y / vt_magn
-                    tz = -vt_z / vt_magn
+                    if vt_magn > 0.:
+                        tx = -vt_x / vt_magn
+                        ty = -vt_y / vt_magn
+                        tz = -vt_z / vt_magn
+                    else:
+                        tx = 0.
+                        ty = 0.
+                        tz = 0.
 
                 # rescale the projection by the magnitude of the
                 # previous tangential force, which gives the tangential
