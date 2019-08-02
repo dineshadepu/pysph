@@ -19,7 +19,7 @@ from pysph.tools.sph_evaluator import SPHEvaluator
 
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EuleIntegratorMultiStage
+from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
 from pysph.sph.rigid_body import (RigidBodyMoments, RigidBodyMotion, BodyForce)
 from pysph.sph.rigid_body_cundall_3d import (
     get_particle_array_rigid_body_cundall, RigidBodyCollision3DCundallEuler,
@@ -245,7 +245,7 @@ class ZhangStackOfCylinders(Application):
     def create_solver(self):
         kernel = CubicSpline(dim=2)
 
-        integrator = EuleIntegratorMultiStage(
+        integrator = EPECIntegratorMultiStage(
             cylinders=RK2StepRigidBodyDEMCundall3d())
 
         dt = self.dt

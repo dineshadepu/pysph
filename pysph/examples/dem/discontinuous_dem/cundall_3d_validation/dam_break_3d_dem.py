@@ -114,6 +114,14 @@ class DemDamBreak3d(Application):
         # When
         a_eval.evaluate(t, dt)
 
+    def customize_output(self):
+        self._mayavi_config('''
+        b = particle_arrays['sand']
+        b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
+        b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
+        b.scalar = 'y'
+        '''.format(s_rad=self.radius))
+
 
 if __name__ == '__main__':
     app = DemDamBreak3d()
