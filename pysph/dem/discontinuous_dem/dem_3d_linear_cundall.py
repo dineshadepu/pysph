@@ -679,17 +679,6 @@ class Cundall3dForceStage2(Equation):
                 fn_mu = self.mu * fn_magn
 
                 if ftr_magn >= fn_mu:
-                    # rescale the tangential displacement
-                    d_tng_fx[found_at] = fn_mu * tx
-                    d_tng_fy[found_at] = fn_mu * ty
-                    d_tng_fz[found_at] = fn_mu * tz
-
-                    # and also adjust the spring elongation
-                    # at time t, which is used at stage 2 integrator
-                    d_tng_fx0[found_at] = d_tng_fx[found_at]
-                    d_tng_fy0[found_at] = d_tng_fy[found_at]
-                    d_tng_fz0[found_at] = d_tng_fz[found_at]
-
                     # set the tangential force to static friction
                     # from Coulomb criterion
                     ft_x = fn_mu * tx

@@ -3,16 +3,13 @@ import numpy as np
 
 # PySPH base and carray imports
 from pysph.base.kernels import CubicSpline
-from pysph.solver.solver import Solver
 
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage, EulerIntegratorMultiStage
+from pysph.sph.scheme import SchemeChooser
 from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
-    get_particle_array_dem_2d_linear_cundall, BodyForce, Cundall2dForceStage1,
-    Cundall2dForceStage2, Cundall2dForceEuler,
-    UpdateTangentialContactsCundall2d, EulerStepDEM2dCundall,
-    RK2StepDEM2dCundall, UpdateTangentialContactsCundall2d)
-from pysph.sph.equation import Group, MultiStageEquations
+    Dem2dCundallScheme, get_particle_array_dem_2d_linear_cundall,
+    UpdateTangentialContactsCundall2d)
+from pysph.sph.equation import Group
 from pysph.tools.geometry import rotate
 
 
@@ -21,22 +18,23 @@ def add_properties(pa, *props):
         pa.add_property(name=prop)
 
 
-class ParticlesinGlass2d(Application):
+class Hopper(Application):
     def __init__(self):
-        super(ParticlesinGlass2d, self).__init__()
+        super(Hopper, self).__init__()
 
     def initialize(self):
         self.dx = 0.05
         self.dt = 1e-4
-        self.tf = 3.
+        self.tf = 3
         self.dim = 2
         self.en = 0.1
         self.kn = 1e5
-        self.wall_time = 1
+        self.wall_time = 1.5
         # friction coefficient
         self.mu = 0.5
         self.gy = -9.81
         self.seval = None
+        self.pfreq = 100
 
     def create_particles(self):
         # create 2d wall with particles
@@ -102,29 +100,23 @@ class ParticlesinGlass2d(Application):
 
         return [wall, sand, glass]
 
-    def create_equations(self):
-        eq1 = [
-            Group(
-                equations=[
-                    BodyForce(dest='sand', sources=None, gy=-9.81),
-                    Cundall2dForceEuler(dest='sand',
-                                        sources=['wall', 'sand', 'glass'],
-                                        kn=self.kn, mu=0.5, en=self.en),
-                ])
-        ]
-        return eq1
+    def create_scheme(self):
+        dem3drk2 = Dem2dCundallScheme(
+            bodies=['sand'], solids=['wall', 'glass'], dim=self.dim,
+            kn=self.kn, mu=self.mu, en=self.en, gy=-9.81, integrator="rk2")
+        dem3deuler = Dem2dCundallScheme(
+            bodies=['sand'], solids=['wall', 'glass'], dim=self.dim,
+            kn=self.kn, mu=self.mu, en=self.en, gy=-9.81, integrator="euler")
+        s = SchemeChooser(default='dem3drk2', dem3drk2=dem3drk2,
+                          dem3deuler=dem3deuler)
+        return s
 
-    def create_solver(self):
+    def configure_scheme(self):
+        scheme = self.scheme
         kernel = CubicSpline(dim=self.dim)
-
-        integrator = EulerIntegratorMultiStage(sand=EulerStepDEM2dCundall())
-
-        dt = self.dt
-        tf = self.tf
-        solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
-                        dt=dt, tf=tf)
-        solver.set_disable_output(True)
-        return solver
+        scheme.configure()
+        scheme.configure_solver(kernel=kernel, dt=self.dt, tf=self.tf,
+                                pfreq=self.pfreq)
 
     def _make_accel_eval(self, equations, pa_arrays):
         from pysph.tools.sph_evaluator import SPHEvaluator
@@ -148,8 +140,8 @@ class ParticlesinGlass2d(Application):
 
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2d(dest='sand',
-                                                  sources=['wall', 'sand', 'glass']),
+                UpdateTangentialContactsCundall2d(
+                    dest='sand', sources=['wall', 'sand', 'glass']),
             ])
         ]
         arrays = self.particles
@@ -158,20 +150,7 @@ class ParticlesinGlass2d(Application):
         # When
         a_eval.evaluate(t, dt)
 
-    def customize_output(self):
-        self._mayavi_config('''
-        b = particle_arrays['sand']
-        b.vectors = 'fx, fy, fz'
-        b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
-        b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
-        b.scalar = 'u'
-        b = particle_arrays['glass']
-        b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
-        b.plot.glyph.glyph_source.glyph_source.radius = {g_rad}
-        b.scalar = 'u'
-        '''.format(s_rad=self.dx/2., g_rad=self.dx/2.))
-
 
 if __name__ == '__main__':
-    app = ParticlesinGlass2d()
+    app = Hopper()
     app.run()

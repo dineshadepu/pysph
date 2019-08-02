@@ -614,9 +614,8 @@ class RK2StepDEM2dCundall(IntegratorStep):
 
 
 class EulerStepDEM2dCundall(IntegratorStep):
-    def stage1(self, d_idx, d_x, d_y, d_u, d_v, d_w, d_fx, d_fy,
-               d_theta_dot, d_torz, d_m_inverse,
-               d_I_inverse, dt):
+    def stage1(self, d_idx, d_x, d_y, d_u, d_v, d_w, d_fx, d_fy, d_theta_dot,
+               d_torz, d_m_inverse, d_I_inverse, dt):
         d_x[d_idx] = d_x[d_idx] + dt * d_u[d_idx]
         d_y[d_idx] = d_y[d_idx] + dt * d_v[d_idx]
 
@@ -628,8 +627,8 @@ class EulerStepDEM2dCundall(IntegratorStep):
 
 
 class Dem2dCundallScheme(Scheme):
-    def __init__(self, bodies, solids, integrator, dim, kn, mu=0.5, en=1.0, gx=0.0,
-                 gy=0.0, debug=False):
+    def __init__(self, bodies, solids, integrator, dim, kn, mu=0.5, en=1.0,
+                 gx=0.0, gy=0.0, debug=False):
         self.bodies = bodies
         self.solids = solids
         self.dim = dim
@@ -699,8 +698,7 @@ class Dem2dCundallScheme(Scheme):
 
         for name in self.bodies:
             g1.append(
-                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy,
-                          gz=self.gz))
+                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy))
 
         for name in self.bodies:
             g1.append(
@@ -719,8 +717,7 @@ class Dem2dCundallScheme(Scheme):
 
         for name in self.bodies:
             g1.append(
-                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy,
-                          gz=self.gz))
+                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy))
 
         for name in self.bodies:
             g1.append(
