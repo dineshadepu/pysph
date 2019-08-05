@@ -120,7 +120,7 @@ class DemDamBreak3d(Application):
         b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
         b.scalar = 'y'
-        '''.format(s_rad=self.radius))
+        '''.format(s_rad=self.dx/2.))
 
 
 if __name__ == '__main__':
