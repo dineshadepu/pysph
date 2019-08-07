@@ -14,6 +14,7 @@ def get_particle_array_bonded_dem_onate(constants=None, **props):
     """Return a particle array for a dem particles
     """
     dim = props.pop('dim', None)
+    clrnc = props.pop('clrnc', None)
 
     dem_props = [
         'theta_x', 'theta_y', 'theta_z', 'wx', 'wy', 'wz', 'fx', 'fy', 'fz',
@@ -39,12 +40,14 @@ def get_particle_array_bonded_dem_onate(constants=None, **props):
 
     pa.add_property('bc_total_contacts', type='int')
     pa.add_property('bc_rest_len', stride=bc_limit)
-    pa.add_property('bc_ft_x', stride=bc_limit)
-    pa.add_property('bc_ft_y', stride=bc_limit)
-    pa.add_property('bc_ft_z', stride=bc_limit)
-    pa.add_property('bc_ft0_x', stride=bc_limit)
-    pa.add_property('bc_ft0_y', stride=bc_limit)
-    pa.add_property('bc_ft0_z', stride=bc_limit)
+    # pa.add_property('bc_ft_x', stride=bc_limit)
+    # pa.add_property('bc_ft_y', stride=bc_limit)
+    # pa.add_property('bc_ft_z', stride=bc_limit)
+    # pa.add_property('bc_ft0_x', stride=bc_limit)
+    # pa.add_property('bc_ft0_y', stride=bc_limit)
+    # pa.add_property('bc_ft0_z', stride=bc_limit)
+
+    setup_bc_contacts(dim, pa, clrnc)
 
     pa.set_output_arrays([
         'x', 'y', 'z', 'u', 'v', 'w', 'wx', 'wy', 'wz', 'm', 'pid', 'tag',
@@ -90,16 +93,16 @@ class SetupContactsBC(Equation):
                 d_bc_rest_len[p] = RIJ
 
 
-class OnateIPForceStage1(Equation):
-    def __init__(self, dest, sources, kn):
+class OnateBDEMForceStage1(Equation):
+    def __init__(self, dest, sources, kn, cn):
         self.kn = kn
         self.kt = kn / 2.
-        super(OnateIPForceStage1, self).__init__(dest, sources)
+        self.cn = cn
+        super(OnateBDEMForceStage1, self).__init__(dest, sources)
 
-    def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_bc_ft_x,
-                   d_bc_ft_y, d_bc_ft_z, d_bc_ft0_x, d_bc_ft0_y, d_bc_ft0_z,
-                   d_bc_limit, d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_u, d_v,
-                   dt):
+    def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_z, d_bc_limit,
+                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_torx, d_tory,
+                   d_torz, d_u, d_v, d_w, d_wx, d_wy, d_wz, d_rad_s, dt):
         p, q1, tot_ctcs, i, sidx = declare('int', 5)
         xij = declare('matrix(3)')
         # total number of contacts of particle i in destination
@@ -113,82 +116,126 @@ class OnateIPForceStage1(Equation):
 
         for i in range(p, q1):
             sidx = d_bc_idx[i]
-            overlap = -1.
-            rij = 0.0
 
             xij[0] = d_x[d_idx] - d_x[sidx]
             xij[1] = d_y[d_idx] - d_y[sidx]
+            xij[2] = d_z[d_idx] - d_z[sidx]
             rij = sqrt(xij[0] * xij[0] + xij[1] * xij[1])
 
             # normal vector from i to j
-            nji_x = xij[0] / rij
-            nji_y = xij[1] / rij
-
             rinv = 1. / rij
-            # print("didx")
-            # print(d_idx)
-            # print("sidx")
-            # print(sidx)
-            # print("hi")
-            # print(d_bc_rest_len[i])
-            # check the particles are not on top of each other.
-            if rij > 0:
-                overlap = rij - d_bc_rest_len[i]
+            nji_x = -xij[0] * rinv
+            nji_y = -xij[1] * rinv
+            nji_z = -xij[2] * rinv
 
-            # print("rij")
-            # print(rij)
-            # print("overlap")
-            # print(overlap)
+            # ======= WRITE TEST ============
+            # find a directions of two other shear directions
+            # global z cross normal nji
+            s1_x = -nji_y
+            s1_y = nji_x
+            s1_z = 0.
+            if s1_x == 0 and s1_y == 0. and s1_z == 0.:
+                s1_x = 0
+                s1_y = 1
+                s1_z = 0
 
-            # relative velocity
-            vr_x = d_u[d_idx] - d_u[sidx]
-            vr_y = d_v[d_idx] - d_v[sidx]
+            # now find the second tangential vector to the plane
+            # normal nji cross s1
+            s2_x = nji_y * s1_z - nji_z * s1_y
+            s2_y = nji_z * s1_x - nji_x * s1_z
+            s2_z = nji_x * s1_y - nji_y * s1_x
 
-            # normal velocity magnitude
-            vr_dot_nij = vr_x * nji_x + vr_y * nji_y
-            vn_x = vr_dot_nij * nji_x
-            vn_y = vr_dot_nij * nji_y
+            xji_dot_nji = -(xij[0] * nji_x + xij[1] * nji_y + xij[2] * nji_z)
+            overlap = xji_dot_nji - d_bc_rest_len[i]
+
+            # relative velocity of particle (only translational)
+            vr_x = d_u[sidx] - d_u[d_idx]
+            vr_y = d_v[sidx] - d_v[d_idx]
+            vr_z = d_w[sidx] - d_w[d_idx]
+            # velocity in normal direction
+            vn = (vr_x * nji_x + vr_y * nji_y + vr_z * nji_z)
+
+            # normal force magnitude
+            cn = self.cn
+            fn = self.kn * overlap + cn * vn
 
             # ---------- force computation starts ------------
-            d_fx[d_idx] -= self.kn * nji_x * overlap - vn_x * 10.
-            d_fy[d_idx] -= self.kn * nji_y * overlap - vn_y * 10.
+            d_fx[d_idx] += fn * nji_x
+            d_fy[d_idx] += fn * nji_y
+            d_fz[d_idx] += fn * nji_z
 
-            # tangential force
-            ft_x = d_bc_ft_x[i]
-            ft_y = d_bc_ft_y[i]
-
-            # TODO
-            # check the coulomb criterion
-
-            # Add the tangential force
-            d_fx[d_idx] += ft_x
-            d_fy[d_idx] += ft_y
-
-            # --------- Tangential force -----------
-            # -----increment the tangential force---
-            # tangential velocity
-            vt_x = vr_x - vn_x
-            vt_y = vr_y - vn_y
-
-            # magnitude of the tangential velocity
-            # vt_magn = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z)**0.5
-
-            # get the incremental force
+            # ---------- tangential force ------------
+            # find displacements of current time step
+            # u is displacement
             dtb2 = dt / 2.
-            d_bc_ft_x[i] += -self.kt * vt_x * dtb2 - vt_x * 10.
-            d_bc_ft_y[i] += -self.kt * vt_y * dtb2 - vt_y * 10.
+            a_i = d_rad_s[d_idx]
+            a_j = d_rad_s[sidx]
+            wijx = (a_i * d_wx[d_idx] + a_j * d_wx[sidx]) * dtb2
+            wijy = (a_i * d_wy[d_idx] + a_j * d_wy[sidx]) * dtb2
+            wijz = (a_i * d_wz[d_idx] + a_j * d_wz[sidx]) * dtb2
+
+            # wij \cross nji
+            wcn_x_dt = wijy * nji_z - wijz * nji_y
+            wcn_y_dt = wijz * nji_x - wijx * nji_z
+            wcn_z_dt = wijx * nji_y - wijy * nji_x
+
+            # net displacement vector
+            u_x = (d_u[d_idx] - d_u[sidx]) * dt + wcn_x_dt
+            u_y = (d_v[d_idx] - d_v[sidx]) * dt + wcn_y_dt
+            u_z = (d_w[d_idx] - d_w[sidx]) * dt + wcn_z_dt
+
+            # net displacement vector in normal direction magn
+            u_n = (u_x * nji_x + u_y * nji_y + u_z * nji_z)
+            # shear displacement vector in 3d space
+            u_sx = u_x - u_n * nji_x
+            u_sy = u_y - u_n * nji_y
+            u_sz = u_z - u_n * nji_z
+
+            # shear displacement in the contact plane in s1 and s2
+            # directions
+            u_s1 = (u_sx * s1_x + u_sy * s1_y + u_sz * s1_z)
+            u_s2 = (u_sx * s2_x + u_sy * s2_y + u_sz * s2_z)
+
+            # total tangential force
+            f_s1 = self.kt * u_s1
+            f_s2 = self.kt * u_s2
+
+            ft_x = f_s1 * s1_x + f_s2 * s2_x
+            ft_y = f_s1 * s1_y + f_s2 * s2_y
+            ft_z = f_s1 * s1_z + f_s2 * s2_z
+
+            # find the torque
+            # the vector till contact point will be
+            # nji * (r_i + (rij - r_i - r_j)/2.)
+            cnst = d_rad_s[d_idx] + (rij - d_rad_s[d_idx] - d_rad_s[sidx]) / 2.
+            rc_i_x = cnst * nji_x
+            rc_i_y = cnst * nji_y
+            rc_i_z = cnst * nji_z
+
+            tor_x = rc_i_x * ft_z - rc_i_z * ft_y
+            tor_y = rc_i_z * ft_x - rc_i_x * ft_z
+            tor_z = rc_i_x * ft_y - rc_i_y * ft_x
+
+            # add toque and tangential force to global vector
+            d_fx[d_idx] += ft_x
+            d_fy[d_idx] += ft_y
+            d_fz[d_idx] += ft_z
+
+            d_torx[d_idx] += tor_x
+            d_tory[d_idx] += tor_y
+            d_torz[d_idx] += tor_z
 
 
-class OnateIPForceStage2(Equation):
-    def __init__(self, dest, sources, kn):
+class OnateBDEMForceStage2(Equation):
+    def __init__(self, dest, sources, kn, cn):
         self.kn = kn
         self.kt = kn / 2.
-        super(OnateIPForceStage2, self).__init__(dest, sources)
+        self.cn = cn
+        super(OnateBDEMForceStage2, self).__init__(dest, sources)
 
-    def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_bc_ft_x,
-                   d_bc_ft_y, d_bc_ft_z, d_bc_ft0_x, d_bc_ft0_y, d_bc_ft0_z,
-                   d_bc_limit, d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_u, d_v,
-                   dt):
+    def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_z, d_bc_limit,
+                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_torx, d_tory,
+                   d_torz, d_u, d_v, d_w, d_wx, d_wy, d_wz, d_rad_s, dt):
         p, q1, tot_ctcs, i, sidx = declare('int', 5)
         xij = declare('matrix(3)')
         # total number of contacts of particle i in destination
@@ -207,72 +254,120 @@ class OnateIPForceStage2(Equation):
 
             xij[0] = d_x[d_idx] - d_x[sidx]
             xij[1] = d_y[d_idx] - d_y[sidx]
+            xij[2] = d_z[d_idx] - d_z[sidx]
             rij = sqrt(xij[0] * xij[0] + xij[1] * xij[1])
 
             # normal vector from i to j
-            nji_x = xij[0] / rij
-            nji_y = xij[1] / rij
-
             rinv = 1. / rij
-            # print("didx")
-            # print(d_idx)
-            # print("sidx")
-            # print(sidx)
-            # print("hi")
-            # print(d_bc_rest_len[i])
-            # check the particles are not on top of each other.
-            if rij > 0:
-                overlap = rij - d_bc_rest_len[i]
+            nji_x = -xij[0] * rinv
+            nji_y = -xij[1] * rinv
+            nji_z = -xij[2] * rinv
 
-            # print("rij")
-            # print(rij)
+            # ======= WRITE TEST ============
+            # find a directions of two other shear directions
+            # global z cross normal nji
+            s1_x = -nji_y
+            s1_y = nji_x
+            s1_z = 0.
+            if s1_x == 0 and s1_y == 0. and s1_z == 0.:
+                s1_x = 0
+                s1_y = 1
+                s1_z = 0
+
+            # now find the second tangential vector to the plane
+            # normal nji cross s1
+            s2_x = nji_y * s1_z - nji_z * s1_y
+            s2_y = nji_z * s1_x - nji_x * s1_z
+            s2_z = nji_x * s1_y - nji_y * s1_x
+
+            # check the particles are not on top of each other.
+            xji_dot_nji = -(xij[0] * nji_x + xij[1] * nji_y + xij[2] * nji_z)
+            overlap = xji_dot_nji - d_bc_rest_len[i]
+
+            # relative velocity of particle (only translational)
+            vr_x = d_u[sidx] - d_u[d_idx]
+            vr_y = d_v[sidx] - d_v[d_idx]
+            vr_z = d_z[sidx] - d_z[d_idx]
+            # velocity in normal direction
+            vn = (vr_x * nji_x + vr_y * nji_y + vr_z * nji_z)
+
+            # normal force magnitude
+            cn = self.cn
+            fn = self.kn * overlap + cn * vn
             # print("overlap")
             # print(overlap)
-
-            # relative velocity
-            vr_x = d_u[d_idx] - d_u[sidx]
-            vr_y = d_v[d_idx] - d_v[sidx]
-
-            # normal velocity magnitude
-            vr_dot_nij = vr_x * nji_x + vr_y * nji_y
-            vn_x = vr_dot_nij * nji_x
-            vn_y = vr_dot_nij * nji_y
+            # print(fn)
 
             # ---------- force computation starts ------------
-            d_fx[d_idx] -= self.kn * nji_x * overlap - vn_x * 10.
-            d_fy[d_idx] -= self.kn * nji_y * overlap - vn_y * 10.
+            d_fx[d_idx] += fn * nji_x
+            d_fy[d_idx] += fn * nji_y
+            d_fz[d_idx] += fn * nji_z
 
-            # tangential force
-            ft_x = d_bc_ft_x[i]
-            ft_y = d_bc_ft_y[i]
+            # ---------- tangential force ------------
+            # find displacements of current time step
+            # u is displacement
+            a_i = d_rad_s[d_idx]
+            a_j = d_rad_s[sidx]
+            wijx = (a_i * d_wx[d_idx] + a_j * d_wx[sidx]) * dt
+            wijy = (a_i * d_wy[d_idx] + a_j * d_wy[sidx]) * dt
+            wijz = (a_i * d_wz[d_idx] + a_j * d_wz[sidx]) * dt
 
-            # TODO
-            # check the coulomb criterion
+            # wij \cross nji
+            wcn_x_dt = wijy * nji_z - wijz * nji_y
+            wcn_y_dt = wijz * nji_x - wijx * nji_z
+            wcn_z_dt = wijx * nji_y - wijy * nji_x
 
-            # Add the tangential force
+            # net displacement vector
+            u_x = (d_u[d_idx] - d_u[sidx]) * dt + wcn_x_dt
+            u_y = (d_v[d_idx] - d_v[sidx]) * dt + wcn_y_dt
+            u_z = (d_w[d_idx] - d_w[sidx]) * dt + wcn_z_dt
+
+            # net displacement vector in normal direction magn
+            u_n = (u_x * nji_x + u_y * nji_y + u_z * nji_z)
+            # shear displacement vector in 3d space
+            u_sx = u_x - u_n * nji_x
+            u_sy = u_y - u_n * nji_y
+            u_sz = u_z - u_n * nji_z
+
+            # shear displacement in the contact plane in s1 and s2
+            # directions
+            u_s1 = (u_sx * s1_x + u_sy * s1_y + u_sz * s1_z)
+            u_s2 = (u_sx * s2_x + u_sy * s2_y + u_sz * s2_z)
+
+            # total tangential force
+            f_s1 = self.kt * u_s1
+            f_s2 = self.kt * u_s2
+
+            ft_x = f_s1 * s1_x + f_s2 * s2_x
+            ft_y = f_s1 * s1_y + f_s2 * s2_y
+            ft_z = f_s1 * s1_z + f_s2 * s2_z
+
+            # find the torque
+            # the vector till contact point will be
+            # nji * (r_i + (rij - r_i - r_j)/2.)
+            cnst = d_rad_s[d_idx] + (rij - d_rad_s[d_idx] - d_rad_s[sidx]) / 2.
+            rc_i_x = cnst * nji_x
+            rc_i_y = cnst * nji_y
+            rc_i_z = cnst * nji_z
+
+            tor_x = rc_i_x * ft_z - rc_i_z * ft_y
+            tor_y = rc_i_z * ft_x - rc_i_x * ft_z
+            tor_z = rc_i_x * ft_y - rc_i_y * ft_x
+
+            # add toque and tangential force to global vector
             d_fx[d_idx] += ft_x
             d_fy[d_idx] += ft_y
+            d_fz[d_idx] += ft_z
 
-            # --------- Tangential force -----------
-            # -----increment the tangential force---
-            # tangential velocity
-            vt_x = vr_x - vn_x
-            vt_y = vr_y - vn_y
-
-            # magnitude of the tangential velocity
-            # vt_magn = (vt_x * vt_x + vt_y * vt_y + vt_z * vt_z)**0.5
-
-            # get the incremental force
-            d_bc_ft_x[i] = d_bc_ft0_x[i] - self.kt * vt_x * dt - vt_x * 10.
-            d_bc_ft_y[i] = d_bc_ft0_y[i] - self.kt * vt_y * dt - vt_y * 10.
+            d_torx[d_idx] += tor_x
+            d_tory[d_idx] += tor_y
+            d_torz[d_idx] += tor_z
 
 
 class RK2StepOnate(IntegratorStep):
     def initialize(self, d_idx, d_x, d_y, d_z, d_x0, d_y0, d_z0, d_u, d_v, d_w,
                    d_u0, d_v0, d_w0, d_wx, d_wy, d_wz, d_wx0, d_wy0, d_wz0,
-                   d_bc_total_contacts, d_bc_limit, d_bc_ft_x, d_bc_ft_y,
-                   d_bc_ft_z, d_bc_ft0_x, d_bc_ft0_y, d_bc_ft0_z):
-
+                   d_bc_total_contacts, d_bc_limit):
         d_x0[d_idx] = d_x[d_idx]
         d_y0[d_idx] = d_y[d_idx]
         d_z0[d_idx] = d_z[d_idx]
@@ -285,21 +380,16 @@ class RK2StepOnate(IntegratorStep):
         d_wy0[d_idx] = d_wy[d_idx]
         d_wz0[d_idx] = d_wz[d_idx]
 
-        # -----------------------------------------------
-        # save the initial tangential contact information
-        # -----------------------------------------------
-        i = declare('int')
-        p = declare('int')
-        q = declare('int')
-        tot_ctcs = declare('int')
-        tot_ctcs = d_bc_total_contacts[d_idx]
-        p = d_idx * d_bc_limit[0]
-        q = p + tot_ctcs
-
-        for i in range(p, q):
-            d_bc_ft0_x[i] = d_bc_ft_x[i]
-            d_bc_ft0_y[i] = d_bc_ft_y[i]
-            d_bc_ft0_z[i] = d_bc_ft_z[i]
+        # # -----------------------------------------------
+        # # save the initial tangential contact information
+        # # -----------------------------------------------
+        # i = declare('int')
+        # p = declare('int')
+        # q = declare('int')
+        # tot_ctcs = declare('int')
+        # tot_ctcs = d_bc_total_contacts[d_idx]
+        # p = d_idx * d_bc_limit[0]
+        # q = p + tot_ctcs
 
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_fx, d_fy, d_fz,
                d_x0, d_y0, d_z0, d_u0, d_v0, d_w0, d_wx0, d_wy0, d_wz0, d_torx,
@@ -332,3 +422,182 @@ class RK2StepOnate(IntegratorStep):
         d_wx[d_idx] = d_wx0[d_idx] + dt * d_torx[d_idx] * d_I_inverse[d_idx]
         d_wy[d_idx] = d_wy0[d_idx] + dt * d_tory[d_idx] * d_I_inverse[d_idx]
         d_wz[d_idx] = d_wz0[d_idx] + dt * d_torz[d_idx] * d_I_inverse[d_idx]
+
+
+class OnateBDEMForceEuler(Equation):
+    def __init__(self, dest, sources, kn, cn):
+        self.kn = kn
+        self.kt = kn / 2.
+        self.cn = cn
+        super(OnateBDEMForceEuler, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_z, d_bc_limit,
+                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_torx, d_tory,
+                   d_torz, d_u, d_v, d_w, d_wx, d_wy, d_wz, d_rad_s, dt):
+        p, q1, tot_ctcs, i, sidx = declare('int', 5)
+        xij = declare('matrix(3)')
+        # total number of contacts of particle i in destination
+        tot_ctcs = d_bc_total_contacts[d_idx]
+
+        # d_idx has a range of tracking indices with sources
+        # starting index is p
+        p = d_idx * d_bc_limit[0]
+        # ending index is q -1
+        q1 = p + tot_ctcs
+
+        for i in range(p, q1):
+            sidx = d_bc_idx[i]
+            overlap = -1.
+            rij = 0.0
+
+            xij[0] = d_x[d_idx] - d_x[sidx]
+            xij[1] = d_y[d_idx] - d_y[sidx]
+            xij[2] = d_z[d_idx] - d_z[sidx]
+            rij = sqrt(xij[0] * xij[0] + xij[1] * xij[1])
+
+            # normal vector from i to j
+            rinv = 1. / rij
+            nji_x = -xij[0] * rinv
+            nji_y = -xij[1] * rinv
+            nji_z = -xij[2] * rinv
+
+            # ======= WRITE TEST ============
+            # find a directions of two other shear directions
+            # global z cross normal nji
+            s1_x = -nji_y
+            s1_y = nji_x
+            s1_z = 0.
+            if s1_x == 0 and s1_y == 0. and s1_z == 0.:
+                s1_x = 0
+                s1_y = 1
+                s1_z = 0
+
+            # now find the second tangential vector to the plane
+            # normal nji cross s1
+            s2_x = nji_y * s1_z - nji_z * s1_y
+            s2_y = nji_z * s1_x - nji_x * s1_z
+            s2_z = nji_x * s1_y - nji_y * s1_x
+
+            # check the particles are not on top of each other.
+            xji_dot_nji = -(xij[0] * nji_x + xij[1] * nji_y + xij[2] * nji_z)
+            overlap = xji_dot_nji - d_bc_rest_len[i]
+
+            # relative velocity of particle (only translational)
+            vr_x = d_u[sidx] - d_u[d_idx]
+            vr_y = d_v[sidx] - d_v[d_idx]
+            vr_z = d_z[sidx] - d_z[d_idx]
+            # velocity in normal direction
+            vn = (vr_x * nji_x + vr_y * nji_y + vr_z * nji_z)
+
+            # normal force magnitude
+            cn = self.cn
+            fn = self.kn * overlap + cn * vn
+
+            # ---------- force computation starts ------------
+            d_fx[d_idx] += fn * nji_x
+            d_fy[d_idx] += fn * nji_y
+            d_fz[d_idx] += fn * nji_z
+
+            # ---------- tangential force ------------
+            # find displacements of current time step
+            # u is displacement
+            a_i = d_rad_s[d_idx]
+            a_j = d_rad_s[sidx]
+            wijx = (a_i * d_wx[d_idx] + a_j * d_wx[sidx]) * dt
+            wijy = (a_i * d_wy[d_idx] + a_j * d_wy[sidx]) * dt
+            wijz = (a_i * d_wz[d_idx] + a_j * d_wz[sidx]) * dt
+
+            # wij \cross nji
+            wcn_x_dt = wijy * nji_z - wijz * nji_y
+            wcn_y_dt = wijz * nji_x - wijx * nji_z
+            wcn_z_dt = wijx * nji_y - wijy * nji_x
+
+            # net displacement vector
+            u_x = (d_u[d_idx] - d_u[sidx]) * dt + wcn_x_dt
+            u_y = (d_v[d_idx] - d_v[sidx]) * dt + wcn_y_dt
+            u_z = (d_w[d_idx] - d_w[sidx]) * dt + wcn_z_dt
+
+            # net displacement vector in normal direction magn
+            u_n = (u_x * nji_x + u_y * nji_y + u_z * nji_z)
+            # shear displacement vector in 3d space
+            u_sx = u_x - u_n * nji_x
+            u_sy = u_y - u_n * nji_y
+            u_sz = u_z - u_n * nji_z
+
+            # shear displacement in the contact plane in s1 and s2
+            # directions
+            u_s1 = (u_sx * s1_x + u_sy * s1_y + u_sz * s1_z)
+            u_s2 = (u_sx * s2_x + u_sy * s2_y + u_sz * s2_z)
+
+            # total tangential force
+            f_s1 = self.kt * u_s1
+            f_s2 = self.kt * u_s2
+
+            ft_x = f_s1 * s1_x + f_s2 * s2_x
+            ft_y = f_s1 * s1_y + f_s2 * s2_y
+            ft_z = f_s1 * s1_z + f_s2 * s2_z
+
+            # find the torque
+            # the vector till contact point will be
+            # nji * (r_i + (rij - r_i - r_j)/2.)
+            cnst = d_rad_s[d_idx] + (rij - d_rad_s[d_idx] - d_rad_s[sidx]) / 2.
+            rc_i_x = cnst * nji_x
+            rc_i_y = cnst * nji_y
+            rc_i_z = cnst * nji_z
+
+            tor_x = rc_i_x * ft_z - rc_i_z * ft_y
+            tor_y = rc_i_z * ft_x - rc_i_x * ft_z
+            tor_z = rc_i_x * ft_y - rc_i_y * ft_x
+
+            # add toque and tangential force to global vector
+            d_fx[d_idx] += ft_x
+            d_fy[d_idx] += ft_y
+            d_fz[d_idx] += ft_z
+
+            d_torx[d_idx] += tor_x
+            d_tory[d_idx] += tor_y
+            d_torz[d_idx] += tor_z
+
+
+class EulerStepOnate(IntegratorStep):
+    def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_fx, d_fy, d_fz,
+               d_torx, d_tory, d_torz, d_wx, d_wy, d_wz, d_m_inverse,
+               d_I_inverse, dt):
+        d_x[d_idx] = d_x[d_idx] + dt * d_u[d_idx]
+        d_y[d_idx] = d_y[d_idx] + dt * d_v[d_idx]
+        d_z[d_idx] = d_z[d_idx] + dt * d_w[d_idx]
+
+        d_u[d_idx] = d_u[d_idx] + dt * d_fx[d_idx] * d_m_inverse[d_idx]
+        d_v[d_idx] = d_v[d_idx] + dt * d_fy[d_idx] * d_m_inverse[d_idx]
+        d_w[d_idx] = d_w[d_idx] + dt * d_fz[d_idx] * d_m_inverse[d_idx]
+
+        d_wx[d_idx] = d_wx[d_idx] + dt * d_torx[d_idx] * d_I_inverse[d_idx]
+        d_wy[d_idx] = d_wy[d_idx] + dt * d_tory[d_idx] * d_I_inverse[d_idx]
+        d_wz[d_idx] = d_wz[d_idx] + dt * d_torz[d_idx] * d_I_inverse[d_idx]
+
+
+class GlobalDampingForce(Equation):
+    def __init__(self, dest, sources, alpha_t=0.1, alpha_r=0.1):
+        self.alpha_t = alpha_t
+        self.alpha_r = alpha_r
+        super(GlobalDampingForce, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_fx, d_fy, d_fz, d_torx, d_tory, d_torz, d_u,
+                   d_v, d_w, d_wx, d_wy, d_wz):
+        f_magn = (d_fx[d_idx]**2. + d_fy[d_idx]**2. + d_fz[d_idx]**2.)**0.5
+        vel_magn = (d_u[d_idx]**2. + d_v[d_idx]**2. + d_w[d_idx]**2.)**0.5
+        if vel_magn > 1e-12:
+            d_fx[d_idx] -= self.alpha_t * f_magn * d_u[d_idx] / vel_magn
+            d_fy[d_idx] -= self.alpha_t * f_magn * d_v[d_idx] / vel_magn
+            d_fz[d_idx] -= self.alpha_t * f_magn * d_w[d_idx] / vel_magn
+
+        tor_magn = (
+            d_torx[d_idx]**2. + d_tory[d_idx]**2. + d_torz[d_idx]**2.)**0.5
+        omega_magn = (d_wx[d_idx]**2. + d_wy[d_idx]**2. + d_wz[d_idx]**2.)**0.5
+        if omega_magn > 1e-12:
+            d_torx[d_idx] -= (
+                self.alpha_r * tor_magn * d_wx[d_idx] / omega_magn)
+            d_tory[d_idx] -= (
+                self.alpha_r * tor_magn * d_wy[d_idx] / omega_magn)
+            d_torz[d_idx] -= (
+                self.alpha_r * tor_magn * d_wz[d_idx] / omega_magn)
