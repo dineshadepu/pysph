@@ -8,7 +8,7 @@ from pysph.solver.application import Application
 from pysph.sph.scheme import SchemeChooser
 from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
     Dem2dCundallScheme, get_particle_array_dem_2d_linear_cundall,
-    UpdateTangentialContactsCundall2d)
+    UpdateTangentialContactsCundall2dPaticleParticle)
 from pysph.sph.equation import Group
 from pysph.tools.geometry import rotate
 
@@ -140,7 +140,7 @@ class Hopper(Application):
 
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2d(
+                UpdateTangentialContactsCundall2dPaticleParticle(
                     dest='sand', sources=['wall', 'sand', 'glass']),
             ])
         ]

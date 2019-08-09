@@ -12,7 +12,7 @@ from pysph.tools.geometry import rotate
 from pysph.tools.geometry import (get_3d_block)
 from pysph.dem.discontinuous_dem.dem_3d_linear_cundall import (
     get_particle_array_dem_3d_linear_cundall, Dem3dCundallScheme,
-    UpdateTangentialContactsCundall3d)
+    UpdateTangentialContactsCundall3dPaticleParticle)
 from pysph.sph.scheme import SchemeChooser
 from pysph.examples._db_geometry import DamBreak3DGeometry
 
@@ -104,7 +104,7 @@ class DemDamBreak3d(Application):
         dt = solver.dt
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall3d(dest='sand',
+                UpdateTangentialContactsCundall3dPaticleParticle(dest='sand',
                                                   sources=['tank', 'sand']),
             ])
         ]

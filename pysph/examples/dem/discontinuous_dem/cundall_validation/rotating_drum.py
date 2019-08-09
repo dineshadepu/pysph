@@ -9,8 +9,8 @@ from pysph.solver.application import Application
 from pysph.sph.scheme import SchemeChooser
 from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
     Dem2dCundallScheme, get_particle_array_dem_2d_linear_cundall,
-    UpdateTangentialContactsCundall2d, RK2StepDEM2dCundall,
-    Cundall2dForceStage1, Cundall2dForceStage2, BodyForce,
+    UpdateTangentialContactsCundall2dPaticleParticle, RK2StepDEM2dCundall,
+    Cundall2dForceParticleParticleStage1, Cundall2dForceParticleParticleStage2, BodyForce,
 )
 from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
 from pysph.sph.equation import Group, MultiStageEquations
@@ -79,7 +79,7 @@ class RotatingDrum(Application):
             Group(
                 equations=[
                     BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81),
-                    Cundall2dForceStage1(dest='sand', sources=['drum', 'sand'],
+                    Cundall2dForceParticleParticleStage1(dest='sand', sources=['drum', 'sand'],
                                          kn=self.kn, mu=0.5, en=self.en)
                 ])
         ]
@@ -87,7 +87,7 @@ class RotatingDrum(Application):
             Group(
                 equations=[
                     BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81),
-                    Cundall2dForceStage2(dest='sand', sources=['drum', 'sand'],
+                    Cundall2dForceParticleParticleStage2(dest='sand', sources=['drum', 'sand'],
                                          kn=self.kn, mu=0.5, en=self.en)
                 ])
         ]
@@ -129,7 +129,7 @@ class RotatingDrum(Application):
 
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2d(dest='sand',
+                UpdateTangentialContactsCundall2dPaticleParticle(dest='sand',
                                                   sources=['sand', 'drum']),
             ])
         ]

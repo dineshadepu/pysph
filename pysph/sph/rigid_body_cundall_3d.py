@@ -667,7 +667,7 @@ class RigidBodyCollision3DCundallStage2(Equation):
                 d_fz[d_idx] += fn_z + ft_z
 
 
-class UpdateTangentialContactsCundall3d(Equation):
+class UpdateTangentialContactsCundall3dPaticleParticle(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_z, d_rad_s,
                         d_total_tng_contacts, d_tng_idx, d_limit, d_tng_fx,
                         d_tng_fy, d_tng_fz, d_tng_fx0, d_tng_fy0, d_tng_fz0,

@@ -11,7 +11,7 @@ from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
 from pysph.sph.scheme import SchemeChooser
 from pysph.dem.discontinuous_dem.dem_3d_linear_cundall import (
     get_particle_array_dem_3d_linear_cundall, Dem3dCundallScheme,
-    UpdateTangentialContactsCundall3d)
+    UpdateTangentialContactsCundall3dPaticleParticle)
 from pysph.sph.equation import Group, MultiStageEquations
 
 
@@ -88,7 +88,7 @@ class AngleCollision(Application):
         dt = solver.dt
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall3d(dest='sand',
+                UpdateTangentialContactsCundall3dPaticleParticle(dest='sand',
                                                   sources=['sand']),
             ])
         ]

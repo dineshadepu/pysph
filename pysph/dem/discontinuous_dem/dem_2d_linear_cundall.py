@@ -61,7 +61,7 @@ class BodyForce(Equation):
         d_torz[d_idx] = 0.
 
 
-class Cundall2dForceEuler(Equation):
+class Cundall2dForceParticleParticleEuler(Equation):
     def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
         self.kn = kn
         self.kt = 2. / 7. * kn
@@ -71,7 +71,7 @@ class Cundall2dForceEuler(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall2dForceEuler, self).__init__(dest, sources)
+        super(Cundall2dForceParticleParticleEuler, self).__init__(dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_theta_dot, d_tng_idx,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
@@ -177,7 +177,7 @@ class Cundall2dForceEuler(Equation):
             d_torz[d_idx] += ft * d_rad_s[d_idx]
 
 
-class Cundall2dForceStage1(Equation):
+class Cundall2dForceParticleParticleStage1(Equation):
     def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
         self.kn = kn
         self.kt = 2. / 7. * kn
@@ -187,7 +187,7 @@ class Cundall2dForceStage1(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall2dForceStage1, self).__init__(dest, sources)
+        super(Cundall2dForceParticleParticleStage1, self).__init__(dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_theta_dot, d_tng_idx,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
@@ -297,7 +297,7 @@ class Cundall2dForceStage1(Equation):
             d_torz[d_idx] += ft * d_rad_s[d_idx]
 
 
-class Cundall2dForceStage2(Equation):
+class Cundall2dForceParticleParticleStage2(Equation):
     def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
         self.kn = kn
         self.kt = 2. / 7. * kn
@@ -307,7 +307,7 @@ class Cundall2dForceStage2(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall2dForceStage2, self).__init__(dest, sources)
+        super(Cundall2dForceParticleParticleStage2, self).__init__(dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_theta_dot, d_tng_idx,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
@@ -402,7 +402,7 @@ class Cundall2dForceStage2(Equation):
             d_torz[d_idx] += ft * d_rad_s[d_idx]
 
 
-class UpdateTangentialContactsCundall2d(Equation):
+class UpdateTangentialContactsCundall2dPaticleParticle(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_rad_s, d_total_tng_contacts,
                         d_tng_idx, d_limit, d_tng_frc, d_tng_idx_dem_id,
                         d_tng_frc0, s_x, s_y, s_rad_s, s_dem_id):
@@ -684,7 +684,7 @@ class Dem2dCundallScheme(Scheme):
 
         for name in self.bodies:
             g1.append(
-                Cundall2dForceStage1(dest=name, sources=all, kn=self.kn,
+                Cundall2dForceParticleParticleStage1(dest=name, sources=all, kn=self.kn,
                                      mu=self.mu, en=self.en))
         stage1.append(Group(equations=g1, real=False))
 
@@ -702,7 +702,7 @@ class Dem2dCundallScheme(Scheme):
 
         for name in self.bodies:
             g1.append(
-                Cundall2dForceStage2(dest=name, sources=all, kn=self.kn,
+                Cundall2dForceParticleParticleStage2(dest=name, sources=all, kn=self.kn,
                                      mu=self.mu, en=self.en))
         stage2.append(Group(equations=g1, real=False))
         return MultiStageEquations([stage1, stage2])
@@ -721,7 +721,7 @@ class Dem2dCundallScheme(Scheme):
 
         for name in self.bodies:
             g1.append(
-                Cundall2dForceEuler(dest=name, sources=all, kn=self.kn,
+                Cundall2dForceParticleParticleEuler(dest=name, sources=all, kn=self.kn,
                                     mu=self.mu, en=self.en))
         stage1.append(Group(equations=g1, real=False))
 

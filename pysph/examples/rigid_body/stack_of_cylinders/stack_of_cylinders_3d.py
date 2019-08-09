@@ -24,7 +24,7 @@ from pysph.sph.rigid_body import (RigidBodyMoments, RigidBodyMotion, BodyForce)
 from pysph.sph.rigid_body_cundall_3d import (
     get_particle_array_rigid_body_cundall, RigidBodyCollision3DCundallEuler,
     RigidBodyCollision3DCundallStage1, RigidBodyCollision3DCundallStage2,
-    UpdateTangentialContactsCundall3d, RK2StepRigidBodyDEMCundall3d)
+    UpdateTangentialContactsCundall3dPaticleParticle, RK2StepRigidBodyDEMCundall3d)
 from pysph.tools.geometry import (get_2d_tank)
 
 
@@ -278,7 +278,7 @@ class ZhangStackOfCylinders(Application):
 
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall3d(
+                UpdateTangentialContactsCundall3dPaticleParticle(
                     dest='cylinders', sources=['cylinders', 'dam', 'wall']),
             ])
         ]

@@ -8,9 +8,9 @@ from pysph.solver.solver import Solver
 from pysph.solver.application import Application
 from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
 from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
-    get_particle_array_dem_2d_linear_cundall, BodyForce, Cundall2dForceStage1,
-    Cundall2dForceStage2, UpdateTangentialContactsCundall2d,
-    RK2StepDEM2dCundall, UpdateTangentialContactsCundall2d)
+    get_particle_array_dem_2d_linear_cundall, BodyForce, Cundall2dForceParticleParticleStage1,
+    Cundall2dForceParticleParticleStage2, UpdateTangentialContactsCundall2dPaticleParticle,
+    RK2StepDEM2dCundall, UpdateTangentialContactsCundall2dPaticleParticle)
 from pysph.sph.equation import Group, MultiStageEquations
 
 
@@ -63,7 +63,7 @@ class BouncingBall(Application):
                 equations=[
                     BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
                               gz=0.0),
-                    Cundall2dForceStage1(dest='sand', sources=['wall'],
+                    Cundall2dForceParticleParticleStage1(dest='sand', sources=['wall'],
                                          kn=self.kn, mu=0.5, en=self.en),
                 ], real=False, update_nnps=False, iterate=False,
                 max_iterations=1, min_iterations=0, pre=None, post=None)
@@ -73,7 +73,7 @@ class BouncingBall(Application):
                 equations=[
                     BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
                               gz=0.0),
-                    Cundall2dForceStage2(dest='sand', sources=['wall'],
+                    Cundall2dForceParticleParticleStage2(dest='sand', sources=['wall'],
                                          kn=self.kn, mu=0.5, en=self.en),
                 ], real=False, update_nnps=False, iterate=False,
                 max_iterations=1, min_iterations=0, pre=None, post=None)
@@ -109,7 +109,7 @@ class BouncingBall(Application):
         dt = solver.dt
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2d(dest='sand',
+                UpdateTangentialContactsCundall2dPaticleParticle(dest='sand',
                                                   sources=['wall']),
             ])
         ]

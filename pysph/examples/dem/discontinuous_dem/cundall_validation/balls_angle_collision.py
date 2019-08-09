@@ -9,7 +9,7 @@ from pysph.solver.application import Application
 from pysph.sph.scheme import SchemeChooser
 from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
     Dem2dCundallScheme, get_particle_array_dem_2d_linear_cundall,
-    UpdateTangentialContactsCundall2d)
+    UpdateTangentialContactsCundall2dPaticleParticle)
 from pysph.sph.equation import Group
 
 
@@ -93,7 +93,7 @@ class BouncingBall(Application):
         dt = solver.dt
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2d(dest='sand',
+                UpdateTangentialContactsCundall2dPaticleParticle(dest='sand',
                                                   sources=['wall']),
             ])
         ]

@@ -11,7 +11,7 @@ from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
 from pysph.sph.scheme import SchemeChooser
 from pysph.dem.discontinuous_dem.dem_3d_linear_cundall import (
     get_particle_array_dem_3d_linear_cundall, Dem3dCundallScheme,
-    UpdateTangentialContactsCundall3d)
+    UpdateTangentialContactsCundall3dPaticleParticle)
 from pysph.tools.geometry import rotate
 from pysph.sph.equation import Group
 
@@ -142,7 +142,7 @@ class ParticlesinGlass2d(Application):
 
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall3d(
+                UpdateTangentialContactsCundall3dPaticleParticle(
                     dest='sand', sources=['wall', 'sand', 'glass']),
             ])
         ]

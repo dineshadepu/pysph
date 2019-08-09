@@ -6,19 +6,22 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import (EPECIntegratorMultiStage, EulerIntegratorMultiStage)
+from pysph.dem.discontinuous_dem.dem_nonlinear import (
+    EPECIntegratorMultiStage, EulerIntegratorMultiStage)
 from pysph.sph.scheme import SchemeChooser
-from pysph.dem.discontinuous_dem.dem_3d_linear_cundall import (
-    get_particle_array_dem_3d_linear_cundall, BodyForce, Cundall3dForceParticleParticleStage1,
-    Cundall3dForceParticleParticleStage2, UpdateTangentialContactsCundall3dPaticleParticle,
-    Cundall3dForceParticleParticleEuler, RK2StepDEM3dCundall,
-    UpdateTangentialContactsCundall3dPaticleParticle, EulerStepDEM3dCundall)
-from pysph.dem.discontinuous_dem.dem_3d_linear_cundall import (
-    get_particle_array_dem_3d_linear_cundall, Dem3dCundallScheme,
-    UpdateTangentialContactsCundall3dPaticleParticle)
+from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
+    get_particle_array_dem_2d_linear_cundall, BodyForce, Cundall2dForceParticleParticleStage1,
+    Cundall2dForceParticleParticleStage2, UpdateTangentialContactsCundall2dPaticleParticle,
+    Cundall2dForceParticleParticleEuler, RK2StepDEM2dCundall,
+    UpdateTangentialContactsCundall2dPaticleParticle, EulerStepDEM2dCundall)
+from pysph.dem.discontinuous_dem.dem_2d_linear_cundall import (
+    Dem2dCundallScheme,
+    UpdateTangentialContactsCundall2dPaticleParticle)
+
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.tools.geometry import rotate
 from pysph.tools.geometry import (get_2d_tank, get_2d_block)
+from pysph.tools.geometry_rigid_fluid import (get_2d_dam_break)
 
 
 def add_properties(pa, *props):
@@ -33,65 +36,60 @@ class ParticlesinGlass2d(Application):
     def initialize(self):
         self.dx = 0.05
         self.dt = 1e-4
-        self.tf = 3
+        self.tf = 2.5 + 0.51
         self.dim = 2
-        self.en = 0.1
+        self.en = 0.5
         self.kn = 1e5
-        self.wall_time = 1.5
         # friction coefficient
-        self.mu = 0.5
+        self.mu = 0.2
         self.gy = -9.81
         self.seval = None
 
-        self.dam_length = 4
-        self.dam_height = 4
+        self.dam_length = 20
+        self.dam_height = 5
         self.dam_spacing = self.dx
         self.dam_layers = 2
-        self.dam_rho = 2000.
+        self.dam_rho = 1850.
 
-        self.sand_length = 1
-        self.sand_height = 3
+        self.sand_length = 4
+        self.sand_height = 2
         self.sand_spacing = self.dx
+        self.sand_rho = 1850.
 
         self.pfreq = 100
 
     def create_particles(self):
         # create tank
-        dx = self.dx
-        xt, yt = get_2d_tank(self.dx, length=self.dam_length,
-                             height=self.dam_height,
-                             num_layers=self.dam_layers, outside=True)
+        xt, yt, xp, yp = get_2d_dam_break(
+            self.dam_length, self.dam_height, self.sand_height,
+            self.sand_length, self.dx, self.dam_layers)
         m = self.dam_rho * self.dam_spacing**2
-        tank = get_particle_array_dem_3d_linear_cundall(
-            x=xt, y=yt, m=m, rad_s=self.dx / 2., dem_id=0,
+        tank = get_particle_array_dem_2d_linear_cundall(
+            x=xt, y=yt, m=m, rad_s=self.dam_spacing / 2., dem_id=0,
             h=1.2 * self.dx / 2., name="tank")
 
-        # create bunch of particle
-        xp, yp = get_2d_block(self.dx, self.sand_length, self.sand_height)
-        yp = yp + self.sand_height / 2. + self.dx
-        xp = xp - self.sand_length / 2. + self.dx
-
+        # create sand of particle
         rad_s = np.ones_like(xp) * self.dx / 2.
-        rho = 2500
+        rho = self.sand_rho
         m = rho * rad_s**3.
         inertia = m * 2. * rad_s**2. / 10.
         m_inverse = 1. / m
         I_inverse = 1. / inertia
-        sand = get_particle_array_dem_3d_linear_cundall(
+        sand = get_particle_array_dem_2d_linear_cundall(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
-            rad_s=rad_s, dem_id=2, h=1.2 * self.dx / 2., name="sand")
+            rad_s=rad_s, dem_id=2, h=1.2 * self.sand_spacing / 2., name="sand")
 
         return [tank, sand]
 
     def create_scheme(self):
-        dem3drk2 = Dem3dCundallScheme(
-            bodies=['sand'], solids=['tank'], dim=self.dim, kn=self.kn,
-            mu=self.mu, en=self.en, gy=-9.81, integrator="rk2")
-        dem3deuler = Dem3dCundallScheme(
+        dem2drk2 = Dem2dCundallScheme(bodies=['sand'], solids=['tank'],
+                                      dim=self.dim, kn=self.kn, mu=self.mu,
+                                      en=self.en, gy=-9.81, integrator="rk2")
+        dem2deuler = Dem2dCundallScheme(
             bodies=['sand'], solids=['tank'], dim=self.dim, kn=self.kn,
             mu=self.mu, en=self.en, gy=-9.81, integrator="euler")
-        s = SchemeChooser(default='dem3drk2', dem3drk2=dem3drk2,
-                          dem3deuler=dem3deuler)
+        s = SchemeChooser(default='dem2drk2', dem2drk2=dem2drk2,
+                          dem2deuler=dem2deuler)
         return s
 
     def configure_scheme(self):
@@ -117,7 +115,7 @@ class ParticlesinGlass2d(Application):
         dt = solver.dt
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall3dPaticleParticle(dest='sand',
+                UpdateTangentialContactsCundall2dPaticleParticle(dest='sand',
                                                   sources=['tank', 'sand']),
             ])
         ]
