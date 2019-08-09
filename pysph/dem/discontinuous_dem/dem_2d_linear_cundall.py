@@ -71,7 +71,8 @@ class Cundall2dForceParticleParticleEuler(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall2dForceParticleParticleEuler, self).__init__(dest, sources)
+        super(Cundall2dForceParticleParticleEuler, self).__init__(
+            dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_theta_dot, d_tng_idx,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
@@ -187,7 +188,8 @@ class Cundall2dForceParticleParticleStage1(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall2dForceParticleParticleStage1, self).__init__(dest, sources)
+        super(Cundall2dForceParticleParticleStage1, self).__init__(
+            dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_theta_dot, d_tng_idx,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
@@ -307,7 +309,8 @@ class Cundall2dForceParticleParticleStage2(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall2dForceParticleParticleStage2, self).__init__(dest, sources)
+        super(Cundall2dForceParticleParticleStage2, self).__init__(
+            dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_theta_dot, d_tng_idx,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
@@ -402,6 +405,357 @@ class Cundall2dForceParticleParticleStage2(Equation):
             d_torz[d_idx] += ft * d_rad_s[d_idx]
 
 
+class Cundall2dForceParticleWallEuler(Equation):
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        self.kn = kn
+        self.kt = 2. / 7. * kn
+        self.kt_1 = 1. / self.kt
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        tmp = log(en)
+        self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
+        super(Cundall2dForceParticleWallStage1, self).__init__(dest, sources)
+
+    def initialize_pair(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy,
+                        d_theta_dot, d_tng_idx, d_tng_idx_dem_id, d_tng_frc,
+                        d_tng_frc0, d_total_tng_contacts, d_dem_id, d_limit,
+                        d_torz, d_rad_s, s_x, s_y, s_nx, s_ny, s_dem_id, s_np,
+                        dt):
+        i, n = declare('int', 2)
+        xij = declare('matrix(2)')
+        vij = declare('matrix(3)')
+
+        p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
+        n = s_np[0]
+
+        for i in range(n):
+            # Force calculation starts
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            overlap = d_rad_s[d_idx] - (xij[0] * s_nx[i] + xij[1] * s_ny[i])
+
+            if overlap > 0:
+                # basic variables: normal vector
+                # normal vector passing from particle to the wall
+                nx = -s_nx[i]
+                ny = -s_ny[i]
+
+                # tangential direction (rotate normal vector 90 degrees
+                # clockwise)
+                tx = ny
+                ty = -nx
+
+                # ---- Relative velocity computation ----
+                tmp = d_theta_dot[d_idx] * d_rad_s[d_idx]
+                vij_x = d_u[d_idx] - tmp * tx
+                vij_y = d_v[d_idx] - tmp * ty
+
+                # scalar components of relative velocity in normal and
+                # tangential directions
+                vn = d_u[d_idx] * nx + d_v[d_idx] * ny
+                vt = d_u[d_idx] * tx + d_v[d_idx] * ty - tmp
+
+                # damping force is taken from
+                # "On the Determination of the Damping Coefficient
+                # of Non-linear Spring-dashpot System to Model
+                # Hertz Contact for Simulation by Discrete Element
+                # Method" paper.
+                # compute the damping constants
+                m_eff = d_m[d_idx]
+                eta_n = self.alpha * sqrt(m_eff)
+
+                # normal force
+                kn_overlap = self.kn * overlap
+                fn_x = -kn_overlap * nx - eta_n * vn * nx
+                fn_y = -kn_overlap * ny - eta_n * vn * ny
+
+                # ------------- tangential force computation ----------------
+                # total number of contacts of particle i in destination
+                tot_ctcs = d_total_tng_contacts[d_idx]
+
+                # d_idx has a range of tracking indices with sources
+                # starting index is p
+                p = d_idx * d_limit[0]
+                # ending index is q -1
+                q1 = p + tot_ctcs
+
+                # check if the particle is in the tracking list
+                # if so, then save the location at found_at
+                found = 0
+                for j in range(p, q1):
+                    if i == d_tng_idx[j]:
+                        if s_dem_id[i] == d_tng_idx_dem_id[j]:
+                            found_at = j
+                            found = 1
+                            break
+                # if the particle is not been tracked then assign an index in
+                # tracking history.
+                if found == 0:
+                    found_at = q1
+                    d_tng_idx[found_at] = i
+                    d_total_tng_contacts[d_idx] += 1
+                    d_tng_idx_dem_id[found_at] = s_dem_id[i]
+
+                # compute the damping constants
+                eta_t = 0.5 * eta_n
+
+                # find the tangential force from the tangential displacement
+                # and tangential velocity (eq 2.11 Thesis Ye)
+                ft = d_tng_frc[found_at]
+
+                # we have to compare with static friction, so
+                # this mu has to be static friction coefficient
+                fn_magn = (fn_x * fn_x + fn_y * fn_y)**(0.5)
+                ft_max = self.mu * fn_magn
+
+                # if the tangential force magnitude is zero, then do nothing,
+                # else do following
+                if ft >= ft_max:
+                    ft = ft_max
+                    d_tng_frc[found_at] = ft_max
+                    d_tng_frc0[found_at] = ft_max
+
+                d_tng_frc[found_at] += self.kt * vt * dt
+
+                d_fx[d_idx] += fn_x - ft * tx
+                d_fy[d_idx] += fn_y - ft * ty
+
+                # torque
+                d_torz[d_idx] += ft * d_rad_s[d_idx]
+
+
+class Cundall2dForceParticleWallStage1(Equation):
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        self.kn = kn
+        self.kt = 2. / 7. * kn
+        self.kt_1 = 1. / self.kt
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        tmp = log(en)
+        self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
+        super(Cundall2dForceParticleWallStage1, self).__init__(dest, sources)
+
+    def initialize_pair(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy,
+                        d_theta_dot, d_tng_idx, d_tng_idx_dem_id, d_tng_frc,
+                        d_tng_frc0, d_total_tng_contacts, d_dem_id, d_limit,
+                        d_torz, d_rad_s, s_x, s_y, s_nx, s_ny, s_dem_id, s_np,
+                        dt):
+        i, n = declare('int', 2)
+        xij = declare('matrix(2)')
+        vij = declare('matrix(3)')
+
+        p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
+        n = s_np[0]
+
+        for i in range(n):
+            # Force calculation starts
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            overlap = d_rad_s[d_idx] - (xij[0] * s_nx[i] + xij[1] * s_ny[i])
+
+            if overlap > 0:
+                # basic variables: normal vector
+                # normal vector passing from particle to the wall
+                nx = -s_nx[i]
+                ny = -s_ny[i]
+
+                # tangential direction (rotate normal vector 90 degrees
+                # clockwise)
+                tx = ny
+                ty = -nx
+
+                # ---- Relative velocity computation ----
+                tmp = d_theta_dot[d_idx] * d_rad_s[d_idx]
+                vij_x = d_u[d_idx] - tmp * tx
+                vij_y = d_v[d_idx] - tmp * ty
+
+                # scalar components of relative velocity in normal and
+                # tangential directions
+                vn = d_u[d_idx] * nx + d_v[d_idx] * ny
+                vt = d_u[d_idx] * tx + d_v[d_idx] * ty - tmp
+
+                # damping force is taken from
+                # "On the Determination of the Damping Coefficient
+                # of Non-linear Spring-dashpot System to Model
+                # Hertz Contact for Simulation by Discrete Element
+                # Method" paper.
+                # compute the damping constants
+                m_eff = d_m[d_idx]
+                eta_n = self.alpha * sqrt(m_eff)
+
+                # normal force
+                kn_overlap = self.kn * overlap
+                fn_x = -kn_overlap * nx - eta_n * vn * nx
+                fn_y = -kn_overlap * ny - eta_n * vn * ny
+
+                # ------------- tangential force computation ----------------
+                # total number of contacts of particle i in destination
+                tot_ctcs = d_total_tng_contacts[d_idx]
+
+                # d_idx has a range of tracking indices with sources
+                # starting index is p
+                p = d_idx * d_limit[0]
+                # ending index is q -1
+                q1 = p + tot_ctcs
+
+                # check if the particle is in the tracking list
+                # if so, then save the location at found_at
+                found = 0
+                for j in range(p, q1):
+                    if i == d_tng_idx[j]:
+                        if s_dem_id[i] == d_tng_idx_dem_id[j]:
+                            found_at = j
+                            found = 1
+                            break
+                # if the particle is not been tracked then assign an index in
+                # tracking history.
+                if found == 0:
+                    found_at = q1
+                    d_tng_idx[found_at] = i
+                    d_total_tng_contacts[d_idx] += 1
+                    d_tng_idx_dem_id[found_at] = s_dem_id[i]
+
+                # compute the damping constants
+                eta_t = 0.5 * eta_n
+
+                # find the tangential force from the tangential displacement
+                # and tangential velocity (eq 2.11 Thesis Ye)
+                ft = d_tng_frc[found_at]
+
+                # we have to compare with static friction, so
+                # this mu has to be static friction coefficient
+                fn_magn = (fn_x * fn_x + fn_y * fn_y)**(0.5)
+                ft_max = self.mu * fn_magn
+
+                # if the tangential force magnitude is zero, then do nothing,
+                # else do following
+                if ft >= ft_max:
+                    ft = ft_max
+                    d_tng_frc[found_at] = ft_max
+                    d_tng_frc0[found_at] = ft_max
+
+                dtb2 = dt / 2.
+                d_tng_frc[found_at] += self.kt * vt * dtb2
+
+                d_fx[d_idx] += fn_x - ft * tx
+                d_fy[d_idx] += fn_y - ft * ty
+
+                # torque
+                d_torz[d_idx] += ft * d_rad_s[d_idx]
+
+
+class Cundall2dForceParticleWallStage2(Equation):
+    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+        self.kn = kn
+        self.kt = 2. / 7. * kn
+        self.kt_1 = 1. / self.kt
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        tmp = log(en)
+        self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
+        super(Cundall2dForceParticleWallStage2, self).__init__(dest, sources)
+
+    def initialize_pair(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy,
+                        d_theta_dot, d_tng_idx, d_tng_idx_dem_id, d_tng_frc,
+                        d_tng_frc0, d_total_tng_contacts, d_dem_id, d_limit,
+                        d_torz, d_rad_s, s_x, s_y, s_nx, s_ny, s_dem_id, s_np,
+                        dt):
+        i, n = declare('int', 2)
+        xij = declare('matrix(2)')
+        vij = declare('matrix(3)')
+
+        p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
+        n = s_np[0]
+
+        for i in range(n):
+            # Force calculation starts
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            overlap = d_rad_s[d_idx] - (xij[0] * s_nx[i] + xij[1] * s_ny[i])
+
+            if overlap > 0:
+                # basic variables: normal vector
+                # normal vector passing from particle to the wall
+                nx = -s_nx[i]
+                ny = -s_ny[i]
+
+                # tangential direction (rotate normal vector 90 degrees
+                # clockwise)
+                tx = ny
+                ty = -nx
+
+                # ---- Relative velocity computation ----
+                tmp = d_theta_dot[d_idx] * d_rad_s[d_idx]
+                vij_x = d_u[d_idx] - tmp * tx
+                vij_y = d_v[d_idx] - tmp * ty
+
+                # scalar components of relative velocity in normal and
+                # tangential directions
+                vn = d_u[d_idx] * nx + d_v[d_idx] * ny
+                vt = d_u[d_idx] * tx + d_v[d_idx] * ty - tmp
+
+                # damping force is taken from
+                # "On the Determination of the Damping Coefficient
+                # of Non-linear Spring-dashpot System to Model
+                # Hertz Contact for Simulation by Discrete Element
+                # Method" paper.
+                # compute the damping constants
+                m_eff = d_m[d_idx]
+                eta_n = self.alpha * sqrt(m_eff)
+
+                # normal force
+                kn_overlap = self.kn * overlap
+                fn_x = -kn_overlap * nx - eta_n * vn * nx
+                fn_y = -kn_overlap * ny - eta_n * vn * ny
+
+                # ------------- tangential force computation ----------------
+                # total number of contacts of particle i in destination
+                tot_ctcs = d_total_tng_contacts[d_idx]
+
+                # d_idx has a range of tracking indices with sources
+                # starting index is p
+                p = d_idx * d_limit[0]
+                # ending index is q -1
+                q1 = p + tot_ctcs
+
+                # check if the particle is in the tracking list
+                # if so, then save the location at found_at
+                found = 0
+                for j in range(p, q1):
+                    if i == d_tng_idx[j]:
+                        if s_dem_id[i] == d_tng_idx_dem_id[j]:
+                            found_at = j
+                            found = 1
+                            break
+                # if the particle is not been tracked then assign an index in
+                # tracking history.
+                ft = 0.
+                if found == 1:
+                    eta_t = 0.5 * eta_n
+
+                    # find the tangential force from the tangential displacement
+                    # and tangential velocity (eq 2.11 Thesis Ye)
+                    ft = d_tng_frc[found_at]
+
+                    # don't check for Coulomb limit as we are dealing with
+                    # RK2 integrator
+
+                    d_tng_frc[
+                        found_at] = d_tng_frc0[found_at] + self.kt * vt * dt
+
+                d_fx[d_idx] += fn_x - ft * tx
+                d_fy[d_idx] += fn_y - ft * ty
+
+                # torque
+                d_torz[d_idx] += ft * d_rad_s[d_idx]
+
+
 class UpdateTangentialContactsCundall2dPaticleParticle(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_rad_s, d_total_tng_contacts,
                         d_tng_idx, d_limit, d_tng_frc, d_tng_idx_dem_id,
@@ -482,10 +836,10 @@ class UpdateTangentialContactsCundall2dPaticleParticle(Equation):
                 count += 1
 
 
-class UpdateTangentialContactsWallNoRotation(Equation):
+class UpdateTangentialContactsCundall2dPaticleWall(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_rad_s, d_total_tng_contacts,
                         d_tng_idx, d_limit, d_tng_frc, d_tng_idx_dem_id,
-                        d_tng_frc0, s_x, s_y, s_nx, s_ny, s_dem_id):
+                        d_tng_frc0, s_x, s_y, s_z, s_nx, s_ny, s_nz, s_dem_id):
         p = declare('int')
         count = declare('int')
         k = declare('int')
@@ -493,6 +847,7 @@ class UpdateTangentialContactsWallNoRotation(Equation):
         last_idx_tmp = declare('int')
         sidx = declare('int')
         dem_id = declare('int')
+        rij = 0.0
 
         idx_total_ctcs = declare('int')
         idx_total_ctcs = d_total_tng_contacts[d_idx]
@@ -527,6 +882,7 @@ class UpdateTangentialContactsWallNoRotation(Equation):
                             d_tng_idx[k] = -1
                             d_tng_idx_dem_id[k] = -1
                             d_tng_frc[k] = 0.
+                            # make tangential0 displacements zero
                             d_tng_frc0[k] = 0.
                         else:
                             # swap the current tracking index with the final
@@ -628,9 +984,10 @@ class EulerStepDEM2dCundall(IntegratorStep):
 
 class Dem2dCundallScheme(Scheme):
     def __init__(self, bodies, solids, integrator, dim, kn, mu=0.5, en=1.0,
-                 gx=0.0, gy=0.0, debug=False):
+                 gx=0.0, gy=0.0, walls=None, debug=False):
         self.bodies = bodies
         self.solids = solids
+        self.walls = walls
         self.dim = dim
         self.integrator = integrator
         self.kn = kn
@@ -684,8 +1041,15 @@ class Dem2dCundallScheme(Scheme):
 
         for name in self.bodies:
             g1.append(
-                Cundall2dForceParticleParticleStage1(dest=name, sources=all, kn=self.kn,
-                                     mu=self.mu, en=self.en))
+                Cundall2dForceParticleParticleStage1(dest=name, sources=all,
+                                                     kn=self.kn, mu=self.mu,
+                                                     en=self.en))
+        if self.walls is not None:
+            for name in self.bodies:
+                g1.append(
+                    Cundall2dForceParticleWallStage1(
+                        dest=name, sources=self.walls, kn=self.kn, mu=self.mu,
+                        en=self.en))
         stage1.append(Group(equations=g1, real=False))
 
         # stage 2
@@ -702,9 +1066,17 @@ class Dem2dCundallScheme(Scheme):
 
         for name in self.bodies:
             g1.append(
-                Cundall2dForceParticleParticleStage2(dest=name, sources=all, kn=self.kn,
-                                     mu=self.mu, en=self.en))
+                Cundall2dForceParticleParticleStage2(dest=name, sources=all,
+                                                     kn=self.kn, mu=self.mu,
+                                                     en=self.en))
+        if self.walls is not None:
+            for name in self.bodies:
+                g1.append(
+                    Cundall2dForceParticleWallStage2(
+                        dest=name, sources=self.walls, kn=self.kn, mu=self.mu,
+                        en=self.en))
         stage2.append(Group(equations=g1, real=False))
+
         return MultiStageEquations([stage1, stage2])
 
     def get_euler_equations(self):
@@ -721,8 +1093,15 @@ class Dem2dCundallScheme(Scheme):
 
         for name in self.bodies:
             g1.append(
-                Cundall2dForceParticleParticleEuler(dest=name, sources=all, kn=self.kn,
-                                    mu=self.mu, en=self.en))
+                Cundall2dForceParticleParticleEuler(dest=name, sources=all,
+                                                    kn=self.kn, mu=self.mu,
+                                                    en=self.en))
+        if self.walls is not None:
+            for name in self.bodies:
+                g1.append(
+                    Cundall2dForceParticleWallEuler(
+                        dest=name, sources=self.walls, kn=self.kn, mu=self.mu,
+                        en=self.en))
         stage1.append(Group(equations=g1, real=False))
 
         return stage1

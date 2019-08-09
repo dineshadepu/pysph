@@ -1497,10 +1497,11 @@ class EulerStepDEM3dCundall(IntegratorStep):
 
 
 class Dem3dCundallScheme(Scheme):
-    def __init__(self, bodies, solids, integrator, dim, kn, mu=0.5, en=1.0,
+    def __init__(self, bodies, solids, integrator, dim, kn, walls=None, mu=0.5, en=1.0,
                  gx=0.0, gy=0.0, gz=0.0, debug=False):
         self.bodies = bodies
         self.solids = solids
+        self.walls = walls
         self.dim = dim
         self.integrator = integrator
         self.kn = kn
@@ -1559,6 +1560,12 @@ class Dem3dCundallScheme(Scheme):
                 Cundall3dForceParticleParticleStage1(dest=name, sources=all,
                                                      kn=self.kn, mu=self.mu,
                                                      en=self.en))
+        if self.walls is not None:
+            for name in self.bodies:
+                g1.append(
+                    Cundall3dForceParticleWallStage1(
+                        dest=name, sources=self.walls, kn=self.kn, mu=self.mu,
+                        en=self.en))
         stage1.append(Group(equations=g1, real=False))
 
         # stage 2
@@ -1579,6 +1586,12 @@ class Dem3dCundallScheme(Scheme):
                 Cundall3dForceParticleParticleStage2(dest=name, sources=all,
                                                      kn=self.kn, mu=self.mu,
                                                      en=self.en))
+        if self.walls is not None:
+            for name in self.bodies:
+                g1.append(
+                    Cundall3dForceParticleWallStage2(
+                        dest=name, sources=self.walls, kn=self.kn, mu=self.mu,
+                        en=self.en))
         stage2.append(Group(equations=g1, real=False))
         return MultiStageEquations([stage1, stage2])
 
