@@ -1,11 +1,7 @@
 """
 Simulation of solid-fluid mixture flow using moving particle methods
 Shuai Zhang
-
 link: https://www.sciencedirect.com/science/article/pii/S0021999108006499
-
-In case 1 we deal the collision forces by Potyondy model.
-
 Time: 7 minutes
 """
 from __future__ import print_function
@@ -17,15 +13,25 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 from pysph.tools.sph_evaluator import SPHEvaluator
 
+from pysph.base.utils import get_particle_array
+
+from pysph.dem.discontinuous_dem.dem_nonlinear import (
+    EPECIntegratorMultiStage, EulerIntegratorMultiStage)
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
-from pysph.dem.discontinuous_dem.dem_nonlinear import EPECIntegratorMultiStage
-from pysph.sph.rigid_body import (RigidBodyMoments, RigidBodyMotion,
-                                  RK2StepRigidBodyDEM, BodyForce)
+
+from pysph.sph.rigid_body import (BodyForce)
+
 from pysph.sph.rigid_body_cundall_2d import (
-    get_particle_array_rigid_body_cundall,
-    RigidBodyCollision2DCundallParticleParticleStage1, RigidBodyCollision2DCundallParticleParticleStage2,
-    UpdateTangentialContactsCundall2dPaticleParticle)
+    get_particle_array_rigid_body_cundall_dem_2d,
+    RigidBodyCollision2DCundallParticleParticleStage1,
+    RigidBodyCollision2DCundallParticleParticleStage2,
+    RigidBodyCollision2DCundallParticleWallStage1,
+    RigidBodyCollision2DCundallParticleWallStage2,
+    SumUpExternalForces,
+    UpdateTangentialContactsCundall2dPaticleParticle,
+    UpdateTangentialContactsCundall2dPaticleWall,
+    RK2StepRigidBodyQuaternionsDEMCundall2d)
 from pysph.tools.geometry import (get_2d_tank)
 
 
@@ -70,7 +76,7 @@ class ZhangStackOfCylinders(Application):
         self.wall_spacing = 1e-3
         self.wall_layers = 2
         # self.wall_time = 0.01
-        self.wall_time = 0.2
+        self.wall_time = 0.075
         self.wall_rho = 2000.
 
         # simulation properties
@@ -79,9 +85,109 @@ class ZhangStackOfCylinders(Application):
 
         # solver data
         self.tf = 0.5 + self.wall_time
-        self.dt = 5e-5
+        self.dt = 4e-5
         self.dim = 2
         self.seval = None
+
+    def create_particles(self):
+        # get bodyid for each cylinder
+        # xc, yc, body_id = self.create_cylinders_stack()
+        xc, yc = create_circle(self.cylinder_diameter, self.cylinder_spacing)
+        xc += 0.02
+        yc += 0.04
+        m = self.cylinder_rho * self.cylinder_spacing**2
+        h = self.hdx * self.cylinder_radius
+        rad_s = self.cylinder_spacing / 2.
+        V = self.cylinder_spacing**2
+        cylinders = get_particle_array_rigid_body_cundall_dem_2d(
+            x=xc, y=yc, h=h, m=m, rho=self.cylinder_rho, rad_s=rad_s, V=V,
+            body_id=0, dem_id=0, name="cylinders")
+        cylinders.omega[2] = 1.
+        cylinders.vc[0] = 1.
+
+        xd = np.array([0., 0., 0.1])
+        yd = np.array([0., 0.03, 0.])
+        nxd = np.array([0, 1.0, -1.0])
+        nyd = np.array([1., 0., 0.])
+        dam = get_particle_array(x=xd, y=yd, nx=nxd, ny=nyd,
+                                 rad_s=self.dam_spacing / 2.,
+                                 constants={'np': len(xd)},
+                                 name="dam")
+        dam.add_property('dem_id', type='int', data=1)
+
+        # create a particle
+        xw = np.array([0.0575])
+        yw = np.array([0.0575])
+        nxw = np.array([-1.])
+        nyw = np.array([0.])
+        wall = get_particle_array(x=xw, y=yw, nx=nxw, ny=nyw,
+                                  rad_s=self.wall_spacing / 2.,
+                                  constants={'np': len(xw)},
+                                  name="wall")
+        wall.add_property('dem_id', type='int', data=2)
+
+        # please run this function to know how
+        # geometry looks like
+        # from matplotlib import pyplot as plt
+        # plt.scatter(cylinders.x, cylinders.y)
+        # plt.scatter(dam.x, dam.y)
+        # plt.scatter(wall.x, wall.y)
+        # plt.axes().set_aspect('equal', 'datalim')
+        # print("done")
+        # plt.show()
+        return [cylinders, dam, wall]
+
+    def create_solver(self):
+        kernel = CubicSpline(dim=2)
+
+        integrator = EPECIntegratorMultiStage(
+            cylinders=RK2StepRigidBodyQuaternionsDEMCundall2d())
+
+        dt = self.dt
+        print("DT: %s" % dt)
+        tf = self.tf
+        solver = Solver(kernel=kernel, dim=2, integrator=integrator, dt=dt,
+                        tf=tf)
+
+        return solver
+
+    def create_equations(self):
+        stage1 = [
+            Group(
+                equations=[
+                    BodyForce(dest='cylinders', sources=None, gy=-9.81),
+                ], real=False),
+            Group(equations=[
+                RigidBodyCollision2DCundallParticleParticleStage1(
+                    dest='cylinders', sources=['cylinders'],
+                    kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
+                RigidBodyCollision2DCundallParticleWallStage1(
+                    dest='cylinders', sources=['dam', 'wall'],
+                    kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
+            ]),
+            Group(equations=[
+                SumUpExternalForces(dest='cylinders', sources=None)
+            ]),
+        ]
+
+        stage2 = [
+            Group(
+                equations=[
+                    BodyForce(dest='cylinders', sources=None, gy=-9.81),
+                ], real=False),
+            Group(equations=[
+                RigidBodyCollision2DCundallParticleParticleStage2(
+                    dest='cylinders', sources=['cylinders'],
+                    kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
+                RigidBodyCollision2DCundallParticleWallStage2(
+                    dest='cylinders', sources=['dam', 'wall'],
+                    kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
+            ]),
+            Group(equations=[
+                SumUpExternalForces(dest='cylinders', sources=None)
+            ]),
+        ]
+        return MultiStageEquations([stage1, stage2])
 
     def create_dam(self):
         xt, yt = get_2d_tank(self.dam_spacing,
@@ -176,88 +282,7 @@ class ZhangStackOfCylinders(Application):
         print("done")
         plt.show()
 
-    def create_particles(self):
-        # get bodyid for each cylinder
-        xc, yc, body_id = self.create_cylinders_stack()
-        m = self.cylinder_rho * self.cylinder_spacing**2
-        h = self.hdx * self.cylinder_radius
-        rad_s = self.cylinder_spacing / 2.
-        V = self.cylinder_spacing**2
-        cylinders = get_particle_array_rigid_body_cundall(
-            x=xc, y=yc, h=h, m=m, rho=self.cylinder_rho, rad_s=rad_s, V=V,
-            body_id=body_id, dem_id=body_id, name="cylinders")
-
-        xd, yd = self.create_dam()
-        dam = get_particle_array_rigid_body_cundall(
-            x=xd, y=yd, h=h, m=m, rho=self.dam_rho,
-            rad_s=self.dam_spacing / 2., V=self.dam_spacing**2, name="dam",
-            dem_id=max(body_id) + 1)
-
-        xw, yw = self.create_wall()
-        wall = get_particle_array_rigid_body_cundall(
-            x=xw, y=yw, h=h, m=m, rho=self.wall_rho,
-            rad_s=self.wall_spacing / 2., V=self.wall_spacing**2, name="wall",
-            dem_id=max(body_id) + 2)
-        wall.x += 0.0015
-
-        # please run this function to know how
-        # geometry looks like
-        # from matplotlib import pyplot as plt
-        # plt.scatter(cylinders.x, cylinders.y)
-        # plt.scatter(dam.x, dam.y)
-        # plt.scatter(wall.x, wall.y)
-        # plt.axes().set_aspect('equal', 'datalim')
-        # print("done")
-        # plt.show()
-        return [cylinders, dam, wall]
-
-    def create_equations(self):
-        stage1 = [
-            Group(
-                equations=[
-                    BodyForce(dest='cylinders', sources=None, gy=-9.81),
-                ], real=False),
-            Group(equations=[
-                RigidBodyCollision2DCundallParticleParticleStage1(
-                    dest='cylinders', sources=['dam', 'wall', 'cylinders'],
-                    kn=1e7, en=0.5, mu=0.3),
-            ]),
-            Group(
-                equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
-        ]
-
-        stage2 = [
-            Group(
-                equations=[
-                    BodyForce(dest='cylinders', sources=None, gy=-9.81),
-                ], real=False),
-            Group(equations=[
-                RigidBodyCollision2DCundallParticleParticleStage2(
-                    dest='cylinders', sources=['dam', 'wall', 'cylinders'],
-                    kn=1e7, en=0.5, mu=0.3),
-            ]),
-            Group(
-                equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
-        ]
-        return MultiStageEquations([stage1, stage2])
-
-    def create_solver(self):
-        kernel = CubicSpline(dim=2)
-
-        integrator = EPECIntegratorMultiStage(cylinders=RK2StepRigidBodyDEM())
-
-        dt = self.dt
-        print("DT: %s" % dt)
-        tf = self.tf
-        solver = Solver(kernel=kernel, dim=2, integrator=integrator, dt=dt,
-                        tf=tf)
-
-        return solver
-
     def _make_accel_eval(self, equations, pa_arrays):
-        from pysph.tools.sph_evaluator import SPHEvaluator
         if self.seval is None:
             kernel = CubicSpline(dim=self.dim)
             seval = SPHEvaluator(arrays=pa_arrays, equations=equations,
@@ -266,6 +291,7 @@ class ZhangStackOfCylinders(Application):
             return self.seval
         else:
             return self.seval
+        return seval
 
     def post_step(self, solver):
         t = solver.t
@@ -274,12 +300,14 @@ class ZhangStackOfCylinders(Application):
         if (T - dt / 2) < t < (T + dt / 2):
             for pa in self.particles:
                 if pa.name == 'wall':
-                    pa.y += 14 * 1e-2
+                    pa.x += 0.25
 
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2dPaticleParticle(dest='cylinders',
-                                                  sources=['cylinders', 'dam', 'wall']),
+                UpdateTangentialContactsCundall2dPaticleParticle(
+                    dest='cylinders', sources=["cylinders"]),
+                UpdateTangentialContactsCundall2dPaticleWall(
+                    dest='cylinders', sources=["wall", "dam"])
             ])
         ]
         arrays = self.particles
@@ -293,7 +321,6 @@ class ZhangStackOfCylinders(Application):
         executed. For some time (self.wall_time), we will keep the wall near
         the cylinders such that they settle down to equilibrium and replicate
         the experiment.
-
         By running the example it becomes much clear.
         """
         if len(self.output_files) == 0:
@@ -339,4 +366,7 @@ class ZhangStackOfCylinders(Application):
 
 if __name__ == '__main__':
     app = ZhangStackOfCylinders()
+    # app.create_particles()
+    # app.geometry()
     app.run()
+    # app.post_process()

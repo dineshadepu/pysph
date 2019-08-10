@@ -23,8 +23,11 @@ from pysph.solver.application import Application
 from pysph.sph.rigid_body import (BodyForce)
 
 from pysph.sph.rigid_body_cundall_2d import (
-    RigidBodyCollision2DCundallParticleParticleStage1, RigidBodyCollision2DCundallParticleParticleStage2,
-    get_particle_array_rigid_body_cundall_dem_2d, SumUpExternalForces,
+    get_particle_array_rigid_body_cundall_dem_2d,
+    RigidBodyCollision2DCundallParticleParticleStage1,
+    RigidBodyCollision2DCundallParticleParticleStage2,
+    UpdateTangentialContactsCundall2dPaticleParticle,
+    SumUpExternalForces,
     RK2StepRigidBodyQuaternionsDEMCundall2d)
 from pysph.tools.geometry import (get_2d_tank)
 
@@ -70,7 +73,7 @@ class ZhangStackOfCylinders(Application):
         self.wall_spacing = 1e-3
         self.wall_layers = 2
         # self.wall_time = 0.01
-        self.wall_time = 0.2
+        self.wall_time = 0.075
         self.wall_rho = 2000.
 
         # simulation properties
@@ -81,6 +84,7 @@ class ZhangStackOfCylinders(Application):
         self.tf = 0.5 + self.wall_time
         self.dt = 4e-5
         self.dim = 2
+        self.seval = None
 
     def create_particles(self):
         # get bodyid for each cylinder
@@ -94,15 +98,15 @@ class ZhangStackOfCylinders(Application):
             body_id=body_id, dem_id=body_id, name="cylinders")
 
         xd, yd = self.create_dam()
-        dam = get_particle_array(
-            x=xd, y=yd, h=h, m=m, rho=self.dam_rho,
-            rad_s=self.dam_spacing / 2., V=self.dam_spacing**2, name="dam")
+        dam = get_particle_array(x=xd, y=yd, h=h, m=m, rho=self.dam_rho,
+                                 rad_s=self.dam_spacing / 2.,
+                                 V=self.dam_spacing**2, name="dam")
         dam.add_property('dem_id', type='int', data=max(body_id) + 1)
 
         xw, yw = self.create_wall()
-        wall = get_particle_array(
-            x=xw, y=yw, h=h, m=m, rho=self.wall_rho,
-            rad_s=self.wall_spacing / 2., V=self.wall_spacing**2, name="wall")
+        wall = get_particle_array(x=xw, y=yw, h=h, m=m, rho=self.wall_rho,
+                                  rad_s=self.wall_spacing / 2.,
+                                  V=self.wall_spacing**2, name="wall")
         wall.add_property('dem_id', type='int', data=max(body_id) + 1)
         wall.x += 0.0015
 
@@ -257,9 +261,14 @@ class ZhangStackOfCylinders(Application):
         plt.show()
 
     def _make_accel_eval(self, equations, pa_arrays):
-        kernel = CubicSpline(dim=self.dim)
-        seval = SPHEvaluator(arrays=pa_arrays, equations=equations,
-                             dim=self.dim, kernel=kernel)
+        if self.seval is None:
+            kernel = CubicSpline(dim=self.dim)
+            seval = SPHEvaluator(arrays=pa_arrays, equations=equations,
+                                 dim=self.dim, kernel=kernel)
+            self.seval = seval
+            return self.seval
+        else:
+            return self.seval
         return seval
 
     def post_step(self, solver):
@@ -271,17 +280,17 @@ class ZhangStackOfCylinders(Application):
                 if pa.name == 'wall':
                     pa.y += 14 * 1e-2
 
-        # eqs1 = [
-        #     Group(equations=[
-        #         UpdateTangentialContacts(dest='cylinders',
-        #                                  sources=["cylinders", "wall", "dam"]),
-        #     ]),
-        # ]
-        # arrays = self.particles
-        # a_eval = self._make_accel_eval(eqs1, arrays)
+        eqs1 = [
+            Group(equations=[
+                UpdateTangentialContactsCundall2dPaticleParticle(
+                    dest='cylinders', sources=["cylinders", "wall", "dam"])
+            ])
+        ]
+        arrays = self.particles
+        a_eval = self._make_accel_eval(eqs1, arrays)
 
-        # # When
-        # a_eval.evaluate(t, dt)
+        # When
+        a_eval.evaluate(t, dt)
 
     def post_process(self):
         """This function will run once per time step after the time step is
