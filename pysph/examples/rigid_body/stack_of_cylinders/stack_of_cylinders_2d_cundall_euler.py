@@ -23,8 +23,8 @@ from pysph.dem.discontinuous_dem.dem_nonlinear import EuleIntegratorMultiStage
 from pysph.sph.rigid_body import (RigidBodyMoments, RigidBodyMotion,
                                   RK2StepRigidBodyDEM, BodyForce)
 from pysph.sph.rigid_body_cundall_2d import (
-    get_particle_array_rigid_body_cundall, RigidBodyCollision2DCundallEuler,
-    RigidBodyCollision2DCundallStage1, RigidBodyCollision2DCundallStage2,
+    get_particle_array_rigid_body_cundall, RigidBodyCollision2DCundallParticleParticleEuler,
+    RigidBodyCollision2DCundallParticleParticleStage1, RigidBodyCollision2DCundallParticleParticleStage2,
     UpdateTangentialContactsCundall2dPaticleParticle)
 from pysph.tools.geometry import (get_2d_tank)
 
@@ -218,7 +218,7 @@ class ZhangStackOfCylinders(Application):
                     BodyForce(dest='cylinders', sources=None, gy=-9.81),
                 ], real=False),
             Group(equations=[
-                RigidBodyCollision2DCundallEuler(
+                RigidBodyCollision2DCundallParticleParticleEuler(
                     dest='cylinders', sources=['dam', 'wall', 'cylinders'],
                     kn=1e7, en=0.5, mu=0.3),
             ]),

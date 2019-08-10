@@ -1,4 +1,10 @@
 import numpy as np
+from scipy.spatial.transform import Rotation as Rot
+
+
+def normalize_q_orientation(q):
+    norm_q = np.sqrt(q[0]**2 + q[1]**2 + q[2]**2 + q[3]**2)
+    q[:] = q[:] / norm_q
 
 
 def set_total_mass(pa):
@@ -60,7 +66,20 @@ def set_mi_in_body_frame(pa):
         pa.mib[9 * i:9 * i + 9] = I_inv[:]
 
 
-def set_mi_in_body_frame_optimized(pa):
+def set_body_frame_position_vectors(pa):
+    """Save the position vectors w.r.t body frame"""
+    nb = pa.nb[0]
+    # loop over all the bodies
+    for i in range(nb):
+        fltr = np.where(pa.body_id == i)[0]
+        cm_i = pa.cm[3 * i:3 * i + 3]
+        for j in fltr:
+            pa.dx0[j] = pa.x[j] - cm_i[0]
+            pa.dy0[j] = pa.y[j] - cm_i[1]
+            pa.dz0[j] = pa.z[j] - cm_i[2]
+
+
+def set_mi_in_body_frame_rot_mat_optimized(pa):
     """Compute the moment of inertia at the beginning of the simulation.
     And set moment of inertia inverse for further computations.
     This method assumes the center of mass is already computed."""
@@ -151,13 +170,25 @@ def set_mi_in_body_frame_optimized(pa):
         pa.R[9 * i:9 * i + 9] = R
 
 
-def get_mi_in_global_frame(pa):
-    """Given particle array at an instant compute the global moment of inertia
-    from the global positions."""
-    no = pa.body_id + 1
+def rotation_mat_to_quat(R, q):
+    """This code is taken from
+    http://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/
+    """
+    q[0] = np.sqrt(R[0] + R[4] + R[8]) / 2
+    q[1] = (R[7] - R[5]) / (4. * q[0])
+    q[2] = (R[2] - R[6]) / (4. * q[0])
+    q[3] = (R[3] - R[1]) / (4. * q[0])
+
+
+def set_mi_in_body_frame_quaternion_optimized(pa):
+    """Compute the moment of inertia at the beginning of the simulation.
+    And set moment of inertia inverse for further computations.
+    This method assumes the center of mass is already computed."""
+    # no of bodies
+    nb = pa.nb[0]
     # loop over all the bodies
-    for i in range(no):
-        fltr = np.where(pa.body_id == i)
+    for i in range(nb):
+        fltr = np.where(pa.body_id == i)[0]
         cm_i = pa.cm[3 * i:3 * i + 3]
 
         I = np.zeros(9)
@@ -186,54 +217,72 @@ def get_mi_in_global_frame(pa):
         I[3] = I[1]
         I[6] = I[2]
         I[7] = I[5]
-    return I
+        # find the eigen vectors and eigen values of the moi
+        vals, R = np.linalg.eigh(I.reshape(3, 3))
+        # find the determinant of R
+        determinant = np.linalg.det(R)
+        if determinant == -1.:
+            R[:, 0] = -R[:, 0]
 
+        # recompute the moment of inertia about the new coordinate frame
+        # if flipping of one of the axis due the determinant value
+        R = R.ravel()
 
-def set_principal_mi_in_body_frame(pa):
-    """Compute the moment of inertia at the beginning of the simulation.
-    And set moment of inertia inverse for further computations.
-    This method assumes the center of mass is already computed."""
-    cm_i = pa.cm
+        if determinant == -1.:
+            I = np.zeros(9)
+            for j in fltr:
+                dx = pa.x[j] - cm_i[0]
+                dy = pa.y[j] - cm_i[1]
+                dz = pa.z[j] - cm_i[2]
 
-    I = np.zeros(9)
-    for j in range(len(pa.x)):
-        # Ixx
-        I[0] += pa.m[j] * ((pa.y[j] - cm_i[1])**2. + (pa.z[j] - cm_i[2])**2.)
+                dx0 = (R[0] * dx + R[3] * dy + R[6] * dz)
+                dy0 = (R[1] * dx + R[4] * dy + R[7] * dz)
+                dz0 = (R[2] * dx + R[5] * dy + R[8] * dz)
 
-        # Iyy
-        I[4] += pa.m[j] * ((pa.x[j] - cm_i[0])**2. + (pa.z[j] - cm_i[2])**2.)
+                # Ixx
+                I[0] += pa.m[j] * (
+                    (dy0)**2. + (dz0)**2.)
 
-        # Izz
-        I[8] += pa.m[j] * ((pa.x[j] - cm_i[0])**2. + (pa.y[j] - cm_i[1])**2.)
+                # Iyy
+                I[4] += pa.m[j] * (
+                    (dx0)**2. + (dz0)**2.)
 
-        # Ixy
-        I[1] -= pa.m[j] * (pa.x[j] - cm_i[0]) * (pa.y[j] - cm_i[1])
+                # Izz
+                I[8] += pa.m[j] * (
+                    (dx0)**2. + (dy0)**2.)
 
-        # Ixz
-        I[2] -= pa.m[j] * (pa.x[j] - cm_i[0]) * (pa.z[j] - cm_i[2])
+                # Ixy
+                I[1] -= pa.m[j] * (dx0) * (dy0)
 
-        # Iyz
-        I[5] -= pa.m[j] * (pa.y[j] - cm_i[1]) * (pa.z[j] - cm_i[2])
+                # Ixz
+                I[2] -= pa.m[j] * (dx0) * (dz0)
 
-    I[3] = I[1]
-    I[6] = I[2]
-    I[7] = I[5]
-    I_inv = np.linalg.inv(I.reshape(3, 3))
-    I_inv = I_inv.ravel()
-    pa.mib[0:9] = I_inv[:]
+                # Iyz
+                I[5] -= pa.m[j] * (dy0) * (dz0)
 
+            I[3] = I[1]
+            I[6] = I[2]
+            I[7] = I[5]
 
-def set_body_frame_position_vectors(pa):
-    """Save the position vectors w.r.t body frame"""
-    nb = pa.nb[0]
-    # loop over all the bodies
-    for i in range(nb):
-        fltr = np.where(pa.body_id == i)[0]
-        cm_i = pa.cm[3 * i:3 * i + 3]
-        for j in fltr:
-            pa.dx0[j] = pa.x[j] - cm_i[0]
-            pa.dy0[j] = pa.y[j] - cm_i[1]
-            pa.dz0[j] = pa.z[j] - cm_i[2]
+            # set the inverse inertia values
+            vals = np.array([I[0], I[4], I[8]])
+
+        pa.mibp[3 * i:3 * i + 3] = 1. / vals
+
+        # get the quaternion from the rotation matrix
+        r = Rot.from_dcm(R.reshape(3, 3))
+        q_tmp = r.as_quat()
+        q = np.zeros(4)
+        q[0] = q_tmp[3]
+        q[1] = q_tmp[0]
+        q[2] = q_tmp[1]
+        q[3] = q_tmp[2]
+
+        normalize_q_orientation(q)
+        pa.q[4 * i:4 * i + 4] = q
+
+        # also set the rotation matrix
+        pa.R[9 * i:9 * i + 9] = R
 
 
 def set_body_frame_position_vectors_optimized(pa):
@@ -252,13 +301,6 @@ def set_body_frame_position_vectors_optimized(pa):
             pa.dx0[j] = (R_i[0] * dx + R_i[3] * dy + R_i[6] * dz)
             pa.dy0[j] = (R_i[1] * dx + R_i[4] * dy + R_i[7] * dz)
             pa.dz0[j] = (R_i[2] * dx + R_i[5] * dy + R_i[8] * dz)
-
-
-def set_angular_momentum(pa):
-    Ig = get_mi_in_global_frame(pa)
-
-    # L = I omega
-    pa.L = np.matmul(Ig, pa.omega)
 
 
 def setup_rotation_matrix_rigid_body(pa):
@@ -284,14 +326,14 @@ def setup_rotation_matrix_rigid_body_optimized(pa):
     angular momentum of a rigid body defined using rotation matrices."""
     set_total_mass(pa)
     set_center_of_mass(pa)
-    set_mi_in_body_frame_optimized(pa)
+    set_mi_in_body_frame_rot_mat_optimized(pa)
     set_body_frame_position_vectors_optimized(pa)
 
 
 def setup_quaternion_rigid_body_optimized(pa):
     """Setup total mass, center of mass, moment of inertia and
-    angular momentum of a rigid body defined using quaternion."""
+    angular momentum of a rigid body defined using rotation matrices."""
     set_total_mass(pa)
     set_center_of_mass(pa)
-    set_mi_in_body_frame_optimized(pa)
+    set_mi_in_body_frame_quaternion_optimized(pa)
     set_body_frame_position_vectors_optimized(pa)

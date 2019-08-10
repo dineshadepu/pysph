@@ -13,16 +13,19 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
 from pysph.tools.sph_evaluator import SPHEvaluator
 
+from pysph.base.utils import get_particle_array
+
 from pysph.dem.discontinuous_dem.dem_nonlinear import (
     EPECIntegratorMultiStage, EulerIntegratorMultiStage)
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
 
-from pysph.sph.rigid_body import (BodyForce, RigidBodyMoments, RigidBodyMotion)
+from pysph.sph.rigid_body import (BodyForce)
 
 from pysph.sph.rigid_body_cundall_2d import (
-    RigidBodyCollision2DCundallStage1, RigidBodyCollision2DCundallStage2,
-    RK2StepRigidBodyDEMCundall, get_particle_array_rigid_body_cundall_dem_2d)
+    RigidBodyCollision2DCundallParticleParticleStage1, RigidBodyCollision2DCundallParticleParticleStage2,
+    get_particle_array_rigid_body_cundall_dem_2d, SumUpExternalForces,
+    RK2StepRigidBodyQuaternionsDEMCundall2d)
 from pysph.tools.geometry import (get_2d_tank)
 
 
@@ -91,16 +94,16 @@ class ZhangStackOfCylinders(Application):
             body_id=body_id, dem_id=body_id, name="cylinders")
 
         xd, yd = self.create_dam()
-        dam = get_particle_array_rigid_body_cundall_dem_2d(
+        dam = get_particle_array(
             x=xd, y=yd, h=h, m=m, rho=self.dam_rho,
-            rad_s=self.dam_spacing / 2., V=self.dam_spacing**2, name="dam",
-            dem_id=max(body_id) + 1)
+            rad_s=self.dam_spacing / 2., V=self.dam_spacing**2, name="dam")
+        dam.add_property('dem_id', type='int', data=max(body_id) + 1)
 
         xw, yw = self.create_wall()
-        wall = get_particle_array_rigid_body_cundall_dem_2d(
+        wall = get_particle_array(
             x=xw, y=yw, h=h, m=m, rho=self.wall_rho,
-            rad_s=self.wall_spacing / 2., V=self.wall_spacing**2, name="wall",
-            dem_id=max(body_id) + 2)
+            rad_s=self.wall_spacing / 2., V=self.wall_spacing**2, name="wall")
+        wall.add_property('dem_id', type='int', data=max(body_id) + 1)
         wall.x += 0.0015
 
         # please run this function to know how
@@ -118,7 +121,7 @@ class ZhangStackOfCylinders(Application):
         kernel = CubicSpline(dim=2)
 
         integrator = EPECIntegratorMultiStage(
-            cylinders=RK2StepRigidBodyDEMCundall())
+            cylinders=RK2StepRigidBodyQuaternionsDEMCundall2d())
 
         dt = self.dt
         print("DT: %s" % dt)
@@ -135,13 +138,13 @@ class ZhangStackOfCylinders(Application):
                     BodyForce(dest='cylinders', sources=None, gy=-9.81),
                 ], real=False),
             Group(equations=[
-                RigidBodyCollision2DCundallStage1(
+                RigidBodyCollision2DCundallParticleParticleStage1(
                     dest='cylinders', sources=['dam', 'wall', 'cylinders'],
                     kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
             ]),
-            Group(
-                equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
+            Group(equations=[
+                SumUpExternalForces(dest='cylinders', sources=None)
+            ]),
         ]
 
         stage2 = [
@@ -150,13 +153,13 @@ class ZhangStackOfCylinders(Application):
                     BodyForce(dest='cylinders', sources=None, gy=-9.81),
                 ], real=False),
             Group(equations=[
-                RigidBodyCollision2DCundallStage2(
+                RigidBodyCollision2DCundallParticleParticleStage2(
                     dest='cylinders', sources=['dam', 'wall', 'cylinders'],
                     kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
             ]),
-            Group(
-                equations=[RigidBodyMoments(dest='cylinders', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='cylinders', sources=None)]),
+            Group(equations=[
+                SumUpExternalForces(dest='cylinders', sources=None)
+            ]),
         ]
         return MultiStageEquations([stage1, stage2])
 

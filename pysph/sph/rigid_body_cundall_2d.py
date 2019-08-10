@@ -7,15 +7,18 @@ import numpy as np
 import numpy
 from math import sqrt, asin, sin, cos, pi, log
 from pysph.sph.rigid_body_setup import (setup_quaternion_rigid_body)
-from pysph.sph.rigid_body import (
-    normalize_q_orientation, quaternion_to_matrix, quaternion_multiplication)
+from pysph.sph.rigid_body import (BodyForce)
 from compyle.api import declare
+from pysph.sph.equation import Group, MultiStageEquations
 
 
+##########################################
+# Rigid body simulation using quaternion #
+##########################################
 def get_particle_array_rigid_body_cundall_dem_2d(constants=None, **props):
     extra_props = [
-        'au', 'av', 'aw', 'V', 'fx', 'fy', 'fz', 'x0', 'y0', 'z0', 'rad_s',
-        'nx', 'ny', 'nz'
+        'fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0', 'nx', 'ny',
+        'nz', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0'
     ]
 
     body_id = props.pop('body_id', None)
@@ -25,41 +28,46 @@ def get_particle_array_rigid_body_cundall_dem_2d(constants=None, **props):
 
     consts = {
         'total_mass': numpy.zeros(nb, dtype=float),
-        'num_body': numpy.asarray(nb, dtype=int),
-        'cm': numpy.zeros(3 * nb, dtype=float),
-
-        # The mi are also used to temporarily reduce mass (1), center of
-        # mass (3) and the inertia components (6), total force (3), total
-        # torque (3).
-        'mi': numpy.zeros(16 * nb, dtype=float),
-        'force': numpy.zeros(3 * nb, dtype=float),
-        'torque': numpy.zeros(3 * nb, dtype=float),
+        'cm': numpy.zeros(3*nb, dtype=float),
+        'cm0': numpy.zeros(3*nb, dtype=float),
+        'q': [1., 0., 0., 0.] * nb,
+        'q0': [1., 0., 0., 0.] * nb,
+        'qdot': numpy.zeros(4*nb, dtype=float),
+        'R': [1., 0., 0., 0., 1., 0., 0., 0., 1.] * nb,
+        # moment of inertia inverse in body frame
+        'mib': numpy.zeros(9*nb, dtype=float),
+        # moment of inertia inverse in global frame
+        'mig': numpy.zeros(9*nb, dtype=float),
+        # total force at the center of mass
+        'force': numpy.zeros(3*nb, dtype=float),
+        # torque about the center of mass
+        'torque': numpy.zeros(3*nb, dtype=float),
         # velocity, acceleration of CM.
-        'vc': numpy.zeros(3 * nb, dtype=float),
-        'ac': numpy.zeros(3 * nb, dtype=float),
-        'vc0': numpy.zeros(3 * nb, dtype=float),
-        # angular velocity, acceleration of body.
-        'omega': numpy.zeros(3 * nb, dtype=float),
-        'omega0': numpy.zeros(3 * nb, dtype=float),
-        'omega_dot': numpy.zeros(3 * nb, dtype=float)
+        'vc': numpy.zeros(3*nb, dtype=float),
+        'vc0': numpy.zeros(3*nb, dtype=float),
+        # angular velocity in global frame
+        'omega': numpy.zeros(3*nb, dtype=float),
+        'omega0': numpy.zeros(3*nb, dtype=float),
+        'nb': nb
     }
+
     if constants:
         consts.update(constants)
+
     pa = get_particle_array(constants=consts, additional_props=extra_props,
                             **props)
     pa.add_property('body_id', type='int', data=body_id)
     pa.add_property('dem_id', type='int', data=dem_id)
+
+    setup_quaternion_rigid_body(pa)
 
     # create the array to save the tangential interaction particles
     # index and other variables
     limit = 6
     setup_rigid_body_cundall_particle_array(pa, limit)
 
-    pa.set_output_arrays([
-        'x', 'y', 'z', 'u', 'v', 'w', 'rho', 'h', 'm', 'p', 'pid', 'au', 'av',
-        'aw', 'tag', 'gid', 'V', 'fx', 'fy', 'fz', 'body_id'
-    ])
-
+    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz', 'm',
+                          'body_id'])
     return pa
 
 
@@ -77,7 +85,7 @@ def setup_rigid_body_cundall_particle_array(pa, limit):
     pa.total_tng_contacts[:] = 0
 
 
-class RigidBodyCollision2DCundallEuler(Equation):
+class RigidBodyCollision2DCundallParticleParticleEuler(Equation):
     def __init__(self, dest, sources, kn=1e7, alpha_n=0.3, nu=0.3, mu=0.5):
         """
         kn: Normal spring stiffness
@@ -92,7 +100,7 @@ class RigidBodyCollision2DCundallEuler(Equation):
         self.cs_fac = self.cn_fac / (2. * (1. + nu))
         self.nu = nu
         self.mu = mu
-        super(RigidBodyCollision2DCundallEuler, self).__init__(dest, sources)
+        super(RigidBodyCollision2DCundallParticleParticleEuler, self).__init__(dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx, d_tng_idx_dem_id,
              d_total_mass, d_body_id, d_tng_frc, d_tng_frc0,
@@ -181,13 +189,13 @@ class RigidBodyCollision2DCundallEuler(Equation):
                     d_tng_frc[found_at] = ft_max
                     d_tng_frc0[found_at] = ft_max
 
-                d_tng_frc[found_at] += self.ks * vt * dt - c_s * vt
+                d_tng_frc[found_at] += self.ks * vt * dt + c_s * vt
 
                 d_fx[d_idx] += fn_x - ft * tx
                 d_fy[d_idx] += fn_y - ft * ty
 
 
-class RigidBodyCollision2DCundallStage1(Equation):
+class RigidBodyCollision2DCundallParticleParticleStage1(Equation):
     def __init__(self, dest, sources, kn=1e7, alpha_n=0.3, nu=0.3, mu=0.5):
         """
         kn: Normal spring stiffness
@@ -202,7 +210,7 @@ class RigidBodyCollision2DCundallStage1(Equation):
         self.cs_fac = self.cn_fac / (2. * (1. + nu))
         self.nu = nu
         self.mu = mu
-        super(RigidBodyCollision2DCundallStage1, self).__init__(dest, sources)
+        super(RigidBodyCollision2DCundallParticleParticleStage1, self).__init__(dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx, d_total_mass, d_body_id,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
@@ -299,7 +307,7 @@ class RigidBodyCollision2DCundallStage1(Equation):
                 d_fy[d_idx] += fn_y - ft * ty
 
 
-class RigidBodyCollision2DCundallStage2(Equation):
+class RigidBodyCollision2DCundallParticleParticleStage2(Equation):
     def __init__(self, dest, sources, kn=1e7, alpha_n=0.3, nu=0.3, mu=0.5):
         """
         kn: Normal spring stiffness
@@ -314,7 +322,7 @@ class RigidBodyCollision2DCundallStage2(Equation):
         self.cs_fac = self.cn_fac / (2. * (1. + nu))
         self.nu = nu
         self.mu = mu
-        super(RigidBodyCollision2DCundallStage2, self).__init__(dest, sources)
+        super(RigidBodyCollision2DCundallParticleParticleStage2, self).__init__(dest, sources)
 
     def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx, d_total_mass, d_body_id,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
@@ -479,147 +487,121 @@ class UpdateTangentialContactsCundall2dPaticleParticle(Equation):
                 count += 1
 
 
-class RK2StepRigidBodyDEMCundall(IntegratorStep):
-    def initialize(self, d_idx, d_x, d_y, d_z, d_x0, d_y0, d_z0, d_omega,
-                   d_omega0, d_vc, d_vc0, d_num_body, d_total_tng_contacts,
-                   d_limit, d_tng_frc, d_tng_frc0):
-        _i = declare('int')
-        _j = declare('int')
-        base = declare('int')
-        if d_idx == 0:
-            for _i in range(d_num_body[0]):
-                base = 3 * _i
-                for _j in range(3):
-                    d_vc0[base + _j] = d_vc[base + _j]
-                    d_omega0[base + _j] = d_omega[base + _j]
-
-        d_x0[d_idx] = d_x[d_idx]
-        d_y0[d_idx] = d_y[d_idx]
-        d_z0[d_idx] = d_z[d_idx]
-
-        # -----------------------------------------------
-        # save the initial tangential contact information
-        # -----------------------------------------------
+class SumUpExternalForces(Equation):
+    def reduce(self, dst, t, dt):
+        frc = declare('object')
+        trq = declare('object')
+        fx = declare('object')
+        fy = declare('object')
+        fz = declare('object')
+        x = declare('object')
+        y = declare('object')
+        z = declare('object')
+        cm = declare('object')
+        body_id = declare('object')
+        j = declare('int')
         i = declare('int')
-        p = declare('int')
-        q = declare('int')
-        tot_ctcs = declare('int')
-        tot_ctcs = d_total_tng_contacts[d_idx]
-        p = d_idx * d_limit[0]
-        q = p + tot_ctcs
+        i3 = declare('int')
 
-        for i in range(p, q):
-            d_tng_frc0[i] = d_tng_frc[i]
+        frc = dst.force
+        trq = dst.torque
+        fx = dst.fx
+        fy = dst.fy
+        fz = dst.fz
+        x = dst.x
+        y = dst.y
+        z = dst.z
+        cm = dst.cm
+        body_id = dst.body_id
 
-    def stage1(self, d_idx, d_u, d_v, d_w, d_x, d_y, d_z, d_x0, d_y0, d_z0,
-               d_omega, d_omega_dot, d_vc, d_ac, d_omega0, d_vc0, d_num_body,
-               d_total_tng_contacts, d_limit, dt=0.0):
-        dtb2 = 0.5 * dt
-        _i = declare('int')
-        j = declare('int')
-        base = declare('int')
-        if d_idx == 0:
-            for _i in range(d_num_body[0]):
-                base = 3 * _i
-                for j in range(3):
-                    d_vc[base + j] = d_vc0[base + j] + d_ac[base + j] * dtb2
-                    d_omega[base + j] = (
-                        d_omega0[base + j] + d_omega_dot[base + j] * dtb2)
+        frc[:] = 0
+        trq[:] = 0
 
-        d_x[d_idx] = d_x0[d_idx] + dtb2 * d_u[d_idx]
-        d_y[d_idx] = d_y0[d_idx] + dtb2 * d_v[d_idx]
-        d_z[d_idx] = d_z0[d_idx] + dtb2 * d_w[d_idx]
+        for j in range(len(x)):
+            i = body_id[j]
+            i3 = 3 * i
+            frc[i3] += fx[j]
+            frc[i3+1] += fy[j]
+            frc[i3+2] += fz[j]
 
-    def stage2(self, d_idx, d_u, d_v, d_w, d_x, d_y, d_z, d_x0, d_y0, d_z0,
-               d_omega, d_omega_dot, d_vc, d_ac, d_omega0, d_vc0, d_num_body,
-               d_total_tng_contacts, d_limit, dt=0.0):
-        _i = declare('int')
-        j = declare('int')
-        base = declare('int')
-        if d_idx == 0:
-            for _i in range(d_num_body[0]):
-                base = 3 * _i
-                for j in range(3):
-                    d_vc[base + j] = d_vc0[base + j] + d_ac[base + j] * dt
-                    d_omega[base + j] = (
-                        d_omega0[base + j] + d_omega_dot[base + j] * dt)
+            # torque due to force on particle i
+            # (r_i - com) \cross f_i
+            dx = x[j] - cm[i3]
+            dy = y[j] - cm[i3+1]
+            dz = z[j] - cm[i3+2]
 
-        d_x[d_idx] = d_x0[d_idx] + dt * d_u[d_idx]
-        d_y[d_idx] = d_y0[d_idx] + dt * d_v[d_idx]
-        d_z[d_idx] = d_z0[d_idx] + dt * d_w[d_idx]
+            # torque due to force on particle i
+            # dri \cross fi
+            trq[i3] += (dy * fz[j] - dz * fy[j])
+            trq[i3+1] += (dz * fx[j] - dx * fz[j])
+            trq[i3+2] += (dx * fy[j] - dy * fx[j])
 
 
-def get_particle_array_rigid_body_quaternion_cundall_2d_dem(constants=None, **props):
-    extra_props = [
-        'fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0', 'nx', 'ny',
-        'nz', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0'
-    ]
-
-    body_id = props.pop('body_id', None)
-    nb = 1 if body_id is None else numpy.max(body_id) + 1
-
-    dem_id = props.pop('dem_id', None)
-
-    consts = {
-        'total_mass': 0.,
-        'cm': numpy.zeros(3, dtype=float),
-        'cm0': numpy.zeros(3, dtype=float),
-        'q': numpy.array([1., 0., 0., 0.]),
-        'q0': numpy.array([1., 0., 0., 0.]),
-        'qdot': numpy.zeros(4, dtype=float),
-        'R': [1., 0., 0., 0., 1., 0., 0., 0., 1.],
-        # moment of inertia inverse in body frame
-        'mib': numpy.zeros(9, dtype=float),
-        # moment of inertia inverse in global frame
-        'mig': numpy.zeros(9, dtype=float),
-        # total force at the center of mass
-        'force': numpy.zeros(3, dtype=float),
-        # torque about the center of mass
-        'torque': numpy.zeros(3, dtype=float),
-        # velocity, acceleration of CM.
-        'vc': numpy.zeros(3, dtype=float),
-        'vc0': numpy.zeros(3, dtype=float),
-        # angular velocity in global frame
-        'omega': numpy.zeros(3, dtype=float),
-        'omega0': numpy.zeros(3, dtype=float),
-        'nb': nb
-    }
-
-    if constants:
-        consts.update(constants)
-
-    pa = get_particle_array(constants=consts, additional_props=extra_props,
-                            **props)
-    pa.add_property('body_id', type='int', data=body_id)
-    pa.add_property('dem_id', type='int', data=dem_id)
-
-    setup_quaternion_rigid_body(pa)
-
-    # create the array to save the tangential interaction particles
-    # index and other variables
-    limit = 6
-    setup_rigid_body_cundall_particle_array(pa, limit)
-
-    pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz', 'm'])
-    return pa
+def normalize_q_orientation(q):
+    norm_q = sqrt(q[0]**2 + q[1]**2 + q[2]**2 + q[3]**2)
+    q[:] = q[:] / norm_q
 
 
-class RK2StepRigidBodyDEMCundallQuaternion(IntegratorStep):
+def quaternion_multiplication(p, q, res):
+    """Parameters
+    ----------
+    p   : [float]
+          An array of length four
+    q   : [float]
+          An array of length four
+    res : [float]
+          An array of length four
+    Here `p` is a quaternion. i.e., p = [p.w, p.x, p.y, p.z]. And q is an
+    another quaternion.
+    This function is used to compute the rate of change of orientation
+    when orientation is represented in terms of a quaternion. When the
+    angular velocity is represented in terms of global frame
+    \frac{dq}{dt} = \frac{1}{2} omega q
+    http://www.ams.stonybrook.edu/~coutsias/papers/rrr.pdf
+    see equation 8
+    """
+    res[0] = (p[0] * q[0] - p[1] * q[1] - p[2] * q[2] - p[3] * q[3])
+    res[1] = (p[0] * q[1] + q[0] * p[1] + p[2] * q[3] - p[3] * q[2])
+    res[2] = (p[0] * q[2] + q[0] * p[2] + p[3] * q[1] - p[1] * q[3])
+    res[3] = (p[0] * q[3] + q[0] * p[3] + p[1] * q[2] - p[2] * q[1])
+
+def scale_quaternion(q, scale):
+    q[0] = q[0] * scale
+    q[1] = q[1] * scale
+    q[2] = q[2] * scale
+    q[3] = q[3] * scale
+
+
+def quaternion_to_matrix(q, matrix):
+    matrix[0] = 1. - 2. * (q[2]**2. + q[3]**2.)
+    matrix[1] = 2. * (q[1] * q[2] - q[0] * q[3])
+    matrix[2] = 2. * (q[1] * q[3] + q[0] * q[2])
+
+    matrix[3] = 2. * (q[1] * q[2] + q[0] * q[3])
+    matrix[4] = 1. - 2. * (q[1]**2. + q[3]**2.)
+    matrix[5] = 2. * (q[2] * q[3] - q[0] * q[1])
+
+    matrix[6] = 2. * (q[1] * q[3] - q[0] * q[2])
+    matrix[7] = 2. * (q[2] * q[3] + q[0] * q[1])
+    matrix[8] = 1. - 2. * (q[1]**2. + q[2]**2.)
+
+
+class RK2StepRigidBodyQuaternionsDEMCundall2d(IntegratorStep):
     def py_initialize(self, dst, t, dt):
-        for j in range(3):
-            # save the center of mass and center of mass velocity
-            dst.cm0[j] = dst.cm[j]
-            dst.vc0[j] = dst.vc[j]
+        for i in range(dst.nb[0]):
+            for j in range(3):
+                # save the center of mass and center of mass velocity
+                dst.cm0[3*i+j] = dst.cm[3*i+j]
+                dst.vc0[3*i+j] = dst.vc[3*i+j]
 
-            # save the current angular momentum
-            dst.omega0[j] = dst.omega[j]
+                dst.omega0[3*i+j] = dst.omega[3*i+j]
 
-        # save the current orientation
-        for j in range(4):
-            dst.q0[j] = dst.q[j]
+            # save the current orientation
+            for j in range(4):
+                dst.q0[4*i+j] = dst.q[4*i+j]
 
-    def initialize(self, d_idx, d_total_tng_contacts, d_limit, d_tng_frc,
-                   d_tng_frc0):
+    def initialize(self, d_idx, d_total_tng_contacts,
+                   d_limit, d_tng_frc, d_tng_frc0):
         # -----------------------------------------------
         # save the initial tangential contact information
         # -----------------------------------------------
@@ -636,62 +618,72 @@ class RK2StepRigidBodyDEMCundallQuaternion(IntegratorStep):
 
     def py_stage1(self, dst, t, dt):
         dtb2 = dt / 2.
-        for j in range(3):
-            # using velocity at t, move position
-            # to t + dt/2.
-            dst.cm[j] = dst.cm[j] + dtb2 * dst.vc[j]
-            dst.vc[j] = dst.vc[j] + dtb2 * dst.force[j] / dst.total_mass[0]
+        for i in range(dst.nb[0]):
+            i3 = 3 * i
+            i4 = 4 * i
+            i9 = 9 * i
+            for j in range(3):
+                # using velocity at t, move position
+                # to t + dt/2.
+                dst.cm[i3+j] = dst.cm[i3+j] + dtb2 * dst.vc[i3+j]
+                dst.vc[i3+j] = dst.vc[i3+j] + dtb2 * dst.force[i3+j] / dst.total_mass[i]
 
-        # change in quaternion
-        delta_quat = np.array([0., 0., 0., 0.])
-        # angular velocity magnitude
-        omega_magn = sqrt(dst.omega[0]**2 + dst.omega[1]**2 + dst.omega[2]**2)
-        axis_rot = np.array([0., 0., 0.])
-        if omega_magn > 1e-12:
-            axis_rot = dst.omega / omega_magn
-        delta_quat[0] = cos(omega_magn * dtb2 * 0.5)
-        delta_quat[1] = axis_rot[0] * sin(omega_magn * dtb2 * 0.5)
-        delta_quat[2] = axis_rot[1] * sin(omega_magn * dtb2 * 0.5)
-        delta_quat[3] = axis_rot[2] * sin(omega_magn * dtb2 * 0.5)
+            # change in quaternion
+            delta_quat = np.array([0., 0., 0., 0.])
+            # angular velocity magnitude
+            omega_magn = sqrt(dst.omega[i3]**2 + dst.omega[i3+1]**2 +
+                              dst.omega[i3+2]**2)
+            axis_rot = np.array([0., 0., 0.])
+            if omega_magn > 1e-12:
+                axis_rot = dst.omega[i3:i3+3] / omega_magn
+            delta_quat[0] = cos(omega_magn * dtb2 * 0.5)
+            delta_quat[1] = axis_rot[0] * sin(omega_magn * dtb2 * 0.5)
+            delta_quat[2] = axis_rot[1] * sin(omega_magn * dtb2 * 0.5)
+            delta_quat[3] = axis_rot[2] * sin(omega_magn * dtb2 * 0.5)
 
-        res = np.array([0., 0., 0., 0.])
-        quaternion_multiplication(dst.q, delta_quat, res)
-        dst.q = res
+            res = np.array([0., 0., 0., 0.])
+            quaternion_multiplication(dst.q[i4:i4+4], delta_quat, res)
+            dst.q[i4:i4+4] = res
 
-        # normalize the orientation
-        normalize_q_orientation(dst.q)
+            # normalize the orientation
+            normalize_q_orientation(dst.q[i4:i4+4])
 
-        # update the moment of inertia
-        quaternion_to_matrix(dst.q, dst.R)
-        R = dst.R.reshape(3, 3)
-        R = R.T
-        dst.R[:] = R.ravel()
-        R_t = R.T
-        tmp = np.matmul(R, dst.mib.reshape(3, 3))
-        dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
-        # move angular velocity to t + dt/2.
-        # omega_dot is
-        tmp = dst.torque - np.cross(
-            dst.omega, np.matmul(dst.mig.reshape(3, 3), dst.omega))
-        omega_dot = np.matmul(dst.mig.reshape(3, 3), tmp)
-        dst.omega = dst.omega0 + omega_dot * dtb2
+            # update the moment of inertia
+            quaternion_to_matrix(dst.q[i4:i4+4], dst.R[i9:i9+9])
+            R = dst.R[i9:i9+9].reshape(3, 3)
+            R_t = R.T
+            tmp = np.matmul(R, dst.mib[i9:i9+9].reshape(3, 3))
+            dst.mig[i9:i9+9] = (np.matmul(tmp, R_t)).ravel()
+            # move angular velocity to t + dt/2.
+            # omega_dot is
+            tmp = dst.torque[i3:i3+3] - np.cross(
+                dst.omega[i3:i3+3], np.matmul(dst.mig[i9:i9+9].reshape(3, 3),
+                                              dst.omega[i3:i3+3]))
+            omega_dot = np.matmul(dst.mig[i9:i9+9].reshape(3, 3), tmp)
+            dst.omega[i3:i3+3] = dst.omega0[i3:i3+3] + omega_dot * dtb2
 
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
-               d_cm, d_vc, d_R, d_omega):
+               d_cm, d_vc, d_R, d_omega, d_body_id):
+        # some variables to update the positions seamlessly
+        bid, i9, i3 = declare('int', 3)
+        bid = d_body_id[d_idx]
+        i9 = 9 * bid
+        i3 = 3 * bid
+
         ###########################
         # Update position vectors #
         ###########################
         # rotate the position of the vector in the body frame to global frame
-        dx = (d_R[0] * d_dx0[d_idx] + d_R[1] * d_dy0[d_idx] +
-              d_R[2] * d_dz0[d_idx])
-        dy = (d_R[3] * d_dx0[d_idx] + d_R[4] * d_dy0[d_idx] +
-              d_R[5] * d_dz0[d_idx])
-        dz = (d_R[6] * d_dx0[d_idx] + d_R[7] * d_dy0[d_idx] +
-              d_R[8] * d_dz0[d_idx])
+        dx = (d_R[i9+0] * d_dx0[d_idx] + d_R[i9+1] * d_dy0[d_idx] +
+              d_R[i9+2] * d_dz0[d_idx])
+        dy = (d_R[i9+3] * d_dx0[d_idx] + d_R[i9+4] * d_dy0[d_idx] +
+              d_R[i9+5] * d_dz0[d_idx])
+        dz = (d_R[i9+6] * d_dx0[d_idx] + d_R[i9+7] * d_dy0[d_idx] +
+              d_R[i9+8] * d_dz0[d_idx])
 
-        d_x[d_idx] = d_cm[0] + dx
-        d_y[d_idx] = d_cm[1] + dy
-        d_z[d_idx] = d_cm[2] + dz
+        d_x[d_idx] = d_cm[i3+0] + dx
+        d_y[d_idx] = d_cm[i3+1] + dy
+        d_z[d_idx] = d_cm[i3+2] + dz
 
         ###########################
         # Update velocity vectors #
@@ -699,69 +691,81 @@ class RK2StepRigidBodyDEMCundallQuaternion(IntegratorStep):
         # here du, dv, dw are velocities due to angular velocity
         # dV = omega \cross dr
         # where dr = x - cm
-        du = d_omega[1] * dz - d_omega[2] * dy
-        dv = d_omega[2] * dx - d_omega[0] * dz
-        dw = d_omega[0] * dy - d_omega[1] * dx
+        du = d_omega[i3+1] * dz - d_omega[i3+2] * dy
+        dv = d_omega[i3+2] * dx - d_omega[i3+0] * dz
+        dw = d_omega[i3+0] * dy - d_omega[i3+1] * dx
 
-        d_u[d_idx] = d_vc[0] + du
-        d_v[d_idx] = d_vc[1] + dv
-        d_w[d_idx] = d_vc[2] + dw
+        d_u[d_idx] = d_vc[i3+0] + du
+        d_v[d_idx] = d_vc[i3+1] + dv
+        d_w[d_idx] = d_vc[i3+2] + dw
 
     def py_stage2(self, dst, t, dt):
-        for j in range(3):
-            dst.cm[j] = dst.cm0[j] + dt * dst.vc[j]
-            dst.vc[j] = dst.vc0[j] + dt * dst.force[j] / dst.total_mass[0]
+        for i in range(dst.nb[0]):
+            i3 = 3 * i
+            i4 = 4 * i
+            i9 = 9 * i
+            for j in range(3):
+                # using velocity at t, move position
+                # to t + dt/2.
+                dst.cm[i3+j] = dst.cm0[i3+j] + dt * dst.vc[i3+j]
+                dst.vc[i3+j] = dst.vc0[i3+j] + dt * dst.force[i3+j] / dst.total_mass[i]
 
-        # delta quaternion (change in quaternion)
-        delta_quat = np.array([0., 0., 0., 0.])
-        # angular velocity magnitude
-        omega_magn = sqrt(dst.omega[0]**2 + dst.omega[1]**2 + dst.omega[2]**2)
-        axis_rot = np.array([0., 0., 0.])
-        if omega_magn > 1e-12:
-            axis_rot = dst.omega / omega_magn
-        delta_quat[0] = cos(omega_magn * dt * 0.5)
-        delta_quat[1] = axis_rot[0] * sin(omega_magn * dt * 0.5)
-        delta_quat[2] = axis_rot[1] * sin(omega_magn * dt * 0.5)
-        delta_quat[3] = axis_rot[2] * sin(omega_magn * dt * 0.5)
+            # change in quaternion
+            delta_quat = np.array([0., 0., 0., 0.])
+            # angular velocity magnitude
+            omega_magn = sqrt(dst.omega[i3]**2 + dst.omega[i3+1]**2 +
+                              dst.omega[i3+2]**2)
+            axis_rot = np.array([0., 0., 0.])
+            if omega_magn > 1e-12:
+                axis_rot = dst.omega[i3:i3+3] / omega_magn
+            delta_quat[0] = cos(omega_magn * dt * 0.5)
+            delta_quat[1] = axis_rot[0] * sin(omega_magn * dt * 0.5)
+            delta_quat[2] = axis_rot[1] * sin(omega_magn * dt * 0.5)
+            delta_quat[3] = axis_rot[2] * sin(omega_magn * dt * 0.5)
 
-        res = np.array([0., 0., 0., 0.])
-        quaternion_multiplication(dst.q0, delta_quat, res)
-        dst.q = res
+            res = np.array([0., 0., 0., 0.])
+            quaternion_multiplication(dst.q0[i4:i4+4], delta_quat, res)
+            dst.q[i4:i4+4] = res
 
-        # normalize the orientation
-        normalize_q_orientation(dst.q)
+            # normalize the orientation
+            normalize_q_orientation(dst.q[i4:i4+4])
 
-        # update the moment of inertia
-        quaternion_to_matrix(dst.q, dst.R)
-        R = dst.R.reshape(3, 3)
-        R = R.T
-        dst.R[:] = R.ravel()
-        R_t = R.T
-        tmp = np.matmul(R, dst.mib.reshape(3, 3))
-        dst.mig[:] = (np.matmul(tmp, R_t)).ravel()
-        # move angular velocity to t + dt/2.
-        # omega_dot is
-        tmp = dst.torque - np.cross(
-            dst.omega, np.matmul(dst.mig.reshape(3, 3), dst.omega))
-        omega_dot = np.matmul(dst.mig.reshape(3, 3), tmp)
-        dst.omega = dst.omega0 + omega_dot * dt
+            # update the moment of inertia
+            quaternion_to_matrix(dst.q[i4:i4+4], dst.R[i9:i9+9])
+            R = dst.R[i9:i9+9].reshape(3, 3)
+            R_t = R.T
+            tmp = np.matmul(R, dst.mib[i9:i9+9].reshape(3, 3))
+            dst.mig[i9:i9+9] = (np.matmul(tmp, R_t)).ravel()
+            # move angular velocity to t + dt
+            # omega_dot is
+            tmp = dst.torque[i3:i3+3] - np.cross(
+                dst.omega[i3:i3+3], np.matmul(dst.mig[i9:i9+9].reshape(3, 3),
+                                              dst.omega[i3:i3+3]))
+            omega_dot = np.matmul(dst.mig[i9:i9+9].reshape(3, 3), tmp)
+            dst.omega[i3:i3+3] = dst.omega0[i3:i3+3] + omega_dot * dt
 
     def stage2(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
-               d_cm, d_vc, d_R, d_omega):
+               d_cm, d_vc, d_R, d_omega, d_body_id):
+        # some variables to update the positions seamlessly
+        bid, i9, i3 = declare('int', 3)
+        bid = d_body_id[d_idx]
+        i9 = 9 * bid
+        i3 = 3 * bid
+
         ###########################
         # Update position vectors #
         ###########################
         # rotate the position of the vector in the body frame to global frame
-        dx = (d_R[0] * d_dx0[d_idx] + d_R[1] * d_dy0[d_idx] +
-              d_R[2] * d_dz0[d_idx])
-        dy = (d_R[3] * d_dx0[d_idx] + d_R[4] * d_dy0[d_idx] +
-              d_R[5] * d_dz0[d_idx])
-        dz = (d_R[6] * d_dx0[d_idx] + d_R[7] * d_dy0[d_idx] +
-              d_R[8] * d_dz0[d_idx])
+        dx = (d_R[i9+0] * d_dx0[d_idx] + d_R[i9+1] * d_dy0[d_idx] +
+              d_R[i9+2] * d_dz0[d_idx])
+        dy = (d_R[i9+3] * d_dx0[d_idx] + d_R[i9+4] * d_dy0[d_idx] +
+              d_R[i9+5] * d_dz0[d_idx])
+        dz = (d_R[i9+6] * d_dx0[d_idx] + d_R[i9+7] * d_dy0[d_idx] +
+              d_R[i9+8] * d_dz0[d_idx])
 
-        d_x[d_idx] = d_cm[0] + dx
-        d_y[d_idx] = d_cm[1] + dy
-        d_z[d_idx] = d_cm[2] + dz
+        d_x[d_idx] = d_cm[i3+0] + dx
+        d_y[d_idx] = d_cm[i3+1] + dy
+        d_z[d_idx] = d_cm[i3+2] + dz
 
         ###########################
         # Update velocity vectors #
@@ -769,10 +773,75 @@ class RK2StepRigidBodyDEMCundallQuaternion(IntegratorStep):
         # here du, dv, dw are velocities due to angular velocity
         # dV = omega \cross dr
         # where dr = x - cm
-        du = d_omega[1] * dz - d_omega[2] * dy
-        dv = d_omega[2] * dx - d_omega[0] * dz
-        dw = d_omega[0] * dy - d_omega[1] * dx
+        du = d_omega[i3+1] * dz - d_omega[i3+2] * dy
+        dv = d_omega[i3+2] * dx - d_omega[i3+0] * dz
+        dw = d_omega[i3+0] * dy - d_omega[i3+1] * dx
 
-        d_u[d_idx] = d_vc[0] + du
-        d_v[d_idx] = d_vc[1] + dv
-        d_w[d_idx] = d_vc[2] + dw
+        d_u[d_idx] = d_vc[i3+0] + du
+        d_v[d_idx] = d_vc[i3+1] + dv
+        d_w[d_idx] = d_vc[i3+2] + dw
+
+
+class RigidBodyQuaternionScheme(Scheme):
+    def __init__(self, bodies, solids, dim, kn, mu=0.5, en=1.0, gx=0.0,
+                 gy=0.0, gz=0.0, debug=False):
+        self.bodies = bodies
+        self.solids = solids
+        self.dim = dim
+        self.kn = kn
+        self.mu = mu
+        self.en = en
+        self.gx = gx
+        self.gy = gy
+        self.gz = gz
+        self.debug = debug
+
+    def configure_solver(self, kernel=None, integrator_cls=None,
+                         extra_steppers=None, **kw):
+        from pysph.base.kernels import CubicSpline
+        from pysph.sph.integrator import EPECIntegrator
+        from pysph.solver.solver import Solver
+        if kernel is None:
+            kernel = CubicSpline(dim=self.dim)
+
+        steppers = {}
+        if extra_steppers is not None:
+            steppers.update(extra_steppers)
+
+        for body in self.bodies:
+            if body not in steppers:
+                steppers[body] = RK2StepRigidBodyQuaternionsDEMCundall2d()
+
+        cls = integrator_cls if integrator_cls is not None else EPECIntegrator
+        integrator = cls(**steppers)
+
+        self.solver = Solver(dim=self.dim, integrator=integrator,
+                             kernel=kernel, **kw)
+
+    def get_equations(self):
+        equations = []
+        g1 = []
+        if self.solids is not None:
+            all = self.bodies + self.solids
+        else:
+            all = self.bodies
+
+        for name in self.bodies:
+            g1.append(
+                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy,
+                          gz=self.gz))
+        equations.append(Group(equations=g1, real=False))
+
+        g2 = []
+        for name in self.bodies:
+            g2.append(
+                RigidBodyCollision2DCundallParticleParticleStage1(dest=name, sources=all, kn=self.kn,
+                                                  mu=self.mu, en=self.en))
+        equations.append(Group(equations=g2, real=False))
+
+        g3 = []
+        for name in self.bodies:
+            g3.append(SumUpExternalForces(dest=name, sources=None))
+        equations.append(Group(equations=g3, real=False))
+
+        return equations
