@@ -954,19 +954,43 @@ class Cundall3dForceParticleWallStage1(Equation):
 
                 # increment the tangential force to next time step
                 dtb2 = dt / 2.
-                d_tng_fx[found_at] -= self.kt * vt_x * dtb2
-                d_tng_fy[found_at] -= self.kt * vt_y * dtb2
-                d_tng_fz[found_at] -= self.kt * vt_z * dtb2
+                # d_tng_fx[found_at] -= self.kt * vt_x * dtb2
+                # d_tng_fy[found_at] -= self.kt * vt_y * dtb2
+                # d_tng_fz[found_at] -= self.kt * vt_z * dtb2
+
+                d_tng_fx[found_at] -= self.kt * vt_x * dtb2 - vt_x * 10
+                d_tng_fy[found_at] -= self.kt * vt_y * dtb2 - vt_y * 10
+                d_tng_fz[found_at] -= self.kt * vt_z * dtb2 - vt_z * 10
 
                 # add normal and tangential force
                 d_fx[d_idx] += fn_x + ft_x
                 d_fy[d_idx] += fn_y + ft_y
                 d_fz[d_idx] += fn_z + ft_z
 
+                # frictional torque
+                tor_fric_x = 0.
+                tor_fric_y = 0.
+                tor_fric_z = 0.
+                omega_magn = (
+                    d_wx[d_idx]**2. + d_wy[d_idx]**2. + d_wz[d_idx]**2.)**0.5
+
+                if omega_magn > 0.:
+                    omega_nx = d_wx[d_idx] / omega_magn
+                    omega_ny = d_wy[d_idx] / omega_magn
+                    omega_nz = d_wz[d_idx] / omega_magn
+                    tor_fric_x = -self.mu * fn_magn * omega_nx
+                    tor_fric_y = -self.mu * fn_magn * omega_ny
+                    tor_fric_z = -self.mu * fn_magn * omega_nz
+
                 # torque = n cross F
-                d_torx[d_idx] += (ny * ft_z - nz * ft_y) * a_i
-                d_tory[d_idx] += (nz * ft_x - nx * ft_z) * a_i
-                d_torz[d_idx] += (nx * ft_y - ny * ft_x) * a_i
+                d_torx[d_idx] += (ny * ft_z - nz * ft_y) * a_i + tor_fric_x
+                d_tory[d_idx] += (nz * ft_x - nx * ft_z) * a_i + tor_fric_y
+                d_torz[d_idx] += (nx * ft_y - ny * ft_x) * a_i + tor_fric_z
+
+                # torque = n cross F
+                # d_torx[d_idx] += (ny * ft_z - nz * ft_y) * a_i
+                # d_tory[d_idx] += (nz * ft_x - nx * ft_z) * a_i
+                # d_torz[d_idx] += (nx * ft_y - ny * ft_x) * a_i
 
 
 class Cundall3dForceParticleWallStage2(Equation):
@@ -995,8 +1019,7 @@ class Cundall3dForceParticleWallStage2(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall3dForceParticleWallStage2, self).__init__(
-            dest, sources)
+        super(Cundall3dForceParticleWallStage2, self).__init__(dest, sources)
 
     def initialize_pair(self, d_idx, d_m, d_x, d_y, d_z, d_u, d_v, d_w, d_wx,
                         d_wy, d_wz, d_fx, d_fy, d_fz, d_tng_idx,
@@ -1202,21 +1225,46 @@ class Cundall3dForceParticleWallStage2(Equation):
                     d_tng_fz0[found_at] = ft0_magn * tz
 
                     # increment the tangential force to next time step
-                    d_tng_fx[
-                        found_at] = d_tng_fx0[found_at] - self.kt * vt_x * dt
-                    d_tng_fy[
-                        found_at] = d_tng_fy0[found_at] - self.kt * vt_y * dt
-                    d_tng_fz[
-                        found_at] = d_tng_fz0[found_at] - self.kt * vt_z * dt
+                    d_tng_fx[found_at] = (
+                        d_tng_fx0[found_at] - self.kt * vt_x * dt - vt_x * 10)
+                    d_tng_fy[found_at] = (
+                        d_tng_fy0[found_at] - self.kt * vt_y * dt - vt_y * 10)
+                    d_tng_fz[found_at] = (
+                        d_tng_fz0[found_at] - self.kt * vt_z * dt - vt_z * 10)
+                    # d_tng_fx[found_at] = (
+                    #     d_tng_fx0[found_at] - self.kt * vt_x * dt)
+                    # d_tng_fy[found_at] = (
+                    #     d_tng_fy0[found_at] - self.kt * vt_y * dt)
+                    # d_tng_fz[found_at] = (
+                    #     d_tng_fz0[found_at] - self.kt * vt_z * dt)
 
                 d_fx[d_idx] += fn_x + ft_x
                 d_fy[d_idx] += fn_y + ft_y
                 d_fz[d_idx] += fn_z + ft_z
 
+                # frictional torque
+                tor_fric_x = 0.
+                tor_fric_y = 0.
+                tor_fric_z = 0.
+                omega_magn = (
+                    d_wx[d_idx]**2. + d_wy[d_idx]**2. + d_wz[d_idx]**2.)**0.5
+
+                if omega_magn > 0.:
+                    omega_nx = d_wx[d_idx] / omega_magn
+                    omega_ny = d_wy[d_idx] / omega_magn
+                    omega_nz = d_wz[d_idx] / omega_magn
+                    tor_fric_x = -self.mu * fn_magn * omega_nx
+                    tor_fric_y = -self.mu * fn_magn * omega_ny
+                    tor_fric_z = -self.mu * fn_magn * omega_nz
+
                 # torque = n cross F
-                d_torx[d_idx] += (ny * ft_z - nz * ft_y) * a_i
-                d_tory[d_idx] += (nz * ft_x - nx * ft_z) * a_i
-                d_torz[d_idx] += (nx * ft_y - ny * ft_x) * a_i
+                d_torx[d_idx] += (ny * ft_z - nz * ft_y) * a_i + tor_fric_x
+                d_tory[d_idx] += (nz * ft_x - nx * ft_z) * a_i + tor_fric_y
+                d_torz[d_idx] += (nx * ft_y - ny * ft_x) * a_i + tor_fric_z
+
+                # d_torx[d_idx] += (ny * ft_z - nz * ft_y) * a_i
+                # d_tory[d_idx] += (nz * ft_x - nx * ft_z) * a_i
+                # d_torz[d_idx] += (nx * ft_y - ny * ft_x) * a_i
 
 
 class UpdateTangentialContactsCundall3dPaticleParticle(Equation):
@@ -1318,10 +1366,10 @@ class UpdateTangentialContactsCundall3dPaticleParticle(Equation):
 
 class UpdateTangentialContactsCundall3dPaticleWall(Equation):
     def initialize_pair(self, d_idx, d_x, d_y, d_z, d_rad_s,
-                        d_total_tng_contacts, d_tng_idx, d_limit,
-                        d_tng_fx, d_tng_fy, d_tng_fz, d_tng_fx0,
-                        d_tng_fy0, d_tng_fz0, d_tng_idx_dem_id,
-                        s_x, s_y, s_z, s_nx, s_ny, s_nz, s_dem_id):
+                        d_total_tng_contacts, d_tng_idx, d_limit, d_tng_fx,
+                        d_tng_fy, d_tng_fz, d_tng_fx0, d_tng_fy0, d_tng_fz0,
+                        d_tng_idx_dem_id, s_x, s_y, s_z, s_nx, s_ny, s_nz,
+                        s_dem_id):
         p = declare('int')
         count = declare('int')
         k = declare('int')
@@ -1497,8 +1545,8 @@ class EulerStepDEM3dCundall(IntegratorStep):
 
 
 class Dem3dCundallScheme(Scheme):
-    def __init__(self, bodies, solids, integrator, dim, kn, walls=None, mu=0.5, en=1.0,
-                 gx=0.0, gy=0.0, gz=0.0, debug=False):
+    def __init__(self, bodies, solids, integrator, dim, kn, walls=None, mu=0.5,
+                 en=1.0, gx=0.0, gy=0.0, gz=0.0, debug=False):
         self.bodies = bodies
         self.solids = solids
         self.walls = walls

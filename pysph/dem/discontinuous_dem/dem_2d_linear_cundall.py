@@ -342,8 +342,6 @@ class Cundall2dForceParticleParticleStage2(Equation):
             # follow Cundall equation (11)
             tmp = (d_theta_dot[d_idx] * d_rad_s[d_idx] +
                    s_theta_dot[s_idx] * s_rad_s[s_idx])
-            vij_x = VIJ[0] - tmp * tx
-            vij_y = VIJ[1] - tmp * ty
 
             # scalar components of relative velocity in normal and
             # tangential directions

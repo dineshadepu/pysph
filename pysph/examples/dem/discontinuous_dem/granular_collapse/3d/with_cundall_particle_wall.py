@@ -38,7 +38,7 @@ class ParticlesinGlass2d(Application):
     def initialize(self):
         self.dx = 0.05
         self.dt = 1e-4
-        self.tf = 10.
+        self.tf = 3.
         self.dim = 2
         self.en = 0.5
         self.kn = 1e5

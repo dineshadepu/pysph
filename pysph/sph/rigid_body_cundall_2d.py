@@ -7,34 +7,15 @@ import numpy as np
 import numpy
 from math import sqrt, asin, sin, cos, pi, log
 from pysph.sph.rigid_body_setup import (setup_quaternion_rigid_body)
+from pysph.sph.rigid_body import (
+    normalize_q_orientation, quaternion_to_matrix, quaternion_multiplication)
 from compyle.api import declare
 
 
-def get_particle_array_rigid_body_cundall(constants=None, **props):
-    """Return a particle array for a rigid body motion.
-
-    For multiple bodies, add a body_id property starting at index 0 with each
-    index denoting the body to which the particle corresponds to.
-
-    Parameters
-    ----------
-    constants : dict
-        Dictionary of constants
-
-    Other Parameters
-    ----------------
-    props : dict
-        Additional keywords passed are set as the property arrays.
-
-    See Also
-    --------
-    get_particle_array
-
-    """
+def get_particle_array_rigid_body_cundall_dem_2d(constants=None, **props):
     extra_props = [
-        'au', 'av', 'aw', 'V', 'fx', 'fy', 'fz',
-        'x0', 'y0', 'z0',
-        'rad_s', 'nx', 'ny', 'nz'
+        'au', 'av', 'aw', 'V', 'fx', 'fy', 'fz', 'x0', 'y0', 'z0', 'rad_s',
+        'nx', 'ny', 'nz'
     ]
 
     body_id = props.pop('body_id', None)
@@ -97,21 +78,26 @@ def setup_rigid_body_cundall_particle_array(pa, limit):
 
 
 class RigidBodyCollision2DCundallEuler(Equation):
-    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+    def __init__(self, dest, sources, kn=1e7, alpha_n=0.3, nu=0.3, mu=0.5):
+        """
+        kn: Normal spring stiffness
+        alpha_n: damping ration
+        nu: Poisson ratio
+        mu: friction coefficient
+        """
         self.kn = kn
-        self.kt = 2. / 7. * kn
-        self.kt_1 = 1. / self.kt
-        self.en = en
-        self.et = 0.5 * self.en
+        self.ks = kn / (2 * (1 + nu))
+        self.alpha_n = alpha_n
+        self.cn_fac = alpha_n * 2 * kn**0.5
+        self.cs_fac = self.cn_fac / (2. * (1. + nu))
+        self.nu = nu
         self.mu = mu
-        tmp = log(en)
-        self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
         super(RigidBodyCollision2DCundallEuler, self).__init__(dest, sources)
 
-    def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx,
-             d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
-             d_dem_id, d_limit, VIJ, XIJ, RIJ, d_rad_s, s_idx, s_m,
-             s_rad_s, s_dem_id, dt):
+    def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx, d_tng_idx_dem_id,
+             d_total_mass, d_body_id, d_tng_frc, d_tng_frc0,
+             d_total_tng_contacts, d_dem_id, d_limit, VIJ, XIJ, RIJ, d_rad_s,
+             s_idx, s_m, s_rad_s, s_dem_id, dt):
         p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
 
         if d_dem_id[d_idx] != s_dem_id[s_idx]:
@@ -141,20 +127,14 @@ class RigidBodyCollision2DCundallEuler(Equation):
                 vn = VIJ[0] * nx + VIJ[1] * ny
                 vt = VIJ[0] * tx + VIJ[1] * ty
 
-                # damping force is taken from
-                # "On the Determination of the Damping Coefficient
-                # of Non-linear Spring-dashpot System to Model
-                # Hertz Contact for Simulation by Discrete Element
-                # Method" paper.
-                # compute the damping constants
-                m_eff = d_m[d_idx] * s_m[s_idx] / (d_m[d_idx] + s_m[s_idx])
-                eta_n = self.alpha * sqrt(m_eff)
+                # taken from "Simulation of solid–fluid mixture flow using
+                # moving particle methods"
+                c_n = self.cn_fac * sqrt(d_total_mass[d_body_id[d_idx]])
 
                 # normal force
                 kn_overlap = self.kn * overlap
-                fn_x = -kn_overlap * nx - eta_n * vn * nx
-                fn_y = -kn_overlap * ny - eta_n * vn * ny
-
+                fn_x = -kn_overlap * nx - c_n * vn * nx
+                fn_y = -kn_overlap * ny - c_n * vn * ny
                 # ------------- tangential force computation ----------------
                 # total number of contacts of particle i in destination
                 tot_ctcs = d_total_tng_contacts[d_idx]
@@ -183,7 +163,7 @@ class RigidBodyCollision2DCundallEuler(Equation):
                     d_tng_idx_dem_id[found_at] = s_dem_id[s_idx]
 
                 # compute the damping constants
-                eta_t = 0.5 * eta_n
+                c_s = self.cs_fac * sqrt(d_total_mass[d_body_id[d_idx]])
 
                 # find the tangential force from the tangential displacement
                 # and tangential velocity (eq 2.11 Thesis Ye)
@@ -201,28 +181,33 @@ class RigidBodyCollision2DCundallEuler(Equation):
                     d_tng_frc[found_at] = ft_max
                     d_tng_frc0[found_at] = ft_max
 
-                d_tng_frc[found_at] += self.kt * vt * dt
+                d_tng_frc[found_at] += self.ks * vt * dt - c_s * vt
 
                 d_fx[d_idx] += fn_x - ft * tx
                 d_fy[d_idx] += fn_y - ft * ty
 
 
 class RigidBodyCollision2DCundallStage1(Equation):
-    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+    def __init__(self, dest, sources, kn=1e7, alpha_n=0.3, nu=0.3, mu=0.5):
+        """
+        kn: Normal spring stiffness
+        alpha_n: damping ration
+        nu: Poisson ratio
+        mu: friction coefficient
+        """
         self.kn = kn
-        self.kt = 2. / 7. * kn
-        self.kt_1 = 1. / self.kt
-        self.en = en
-        self.et = 0.5 * self.en
+        self.ks = kn / (2 * (1 + nu))
+        self.alpha_n = alpha_n
+        self.cn_fac = alpha_n * 2 * kn**0.5
+        self.cs_fac = self.cn_fac / (2. * (1. + nu))
+        self.nu = nu
         self.mu = mu
-        tmp = log(en)
-        self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
         super(RigidBodyCollision2DCundallStage1, self).__init__(dest, sources)
 
-    def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx,
+    def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx, d_total_mass, d_body_id,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
-             d_dem_id, d_limit, VIJ, XIJ, RIJ, d_rad_s, s_idx, s_m,
-             s_rad_s, s_dem_id, dt):
+             d_dem_id, d_limit, VIJ, XIJ, RIJ, d_rad_s, s_idx, s_m, s_rad_s,
+             s_dem_id, dt):
         p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
 
         if d_dem_id[d_idx] != s_dem_id[s_idx]:
@@ -252,19 +237,14 @@ class RigidBodyCollision2DCundallStage1(Equation):
                 vn = VIJ[0] * nx + VIJ[1] * ny
                 vt = VIJ[0] * tx + VIJ[1] * ty
 
-                # damping force is taken from
-                # "On the Determination of the Damping Coefficient
-                # of Non-linear Spring-dashpot System to Model
-                # Hertz Contact for Simulation by Discrete Element
-                # Method" paper.
-                # compute the damping constants
-                m_eff = d_m[d_idx] * s_m[s_idx] / (d_m[d_idx] + s_m[s_idx])
-                eta_n = self.alpha * sqrt(m_eff)
+                # taken from "Simulation of solid–fluid mixture flow using
+                # moving particle methods"
+                c_n = self.cn_fac * sqrt(d_total_mass[d_body_id[d_idx]])
 
                 # normal force
                 kn_overlap = self.kn * overlap
-                fn_x = -kn_overlap * nx - eta_n * vn * nx
-                fn_y = -kn_overlap * ny - eta_n * vn * ny
+                fn_x = -kn_overlap * nx - c_n * vn * nx
+                fn_y = -kn_overlap * ny - c_n * vn * ny
 
                 # ------------- tangential force computation ----------------
                 # total number of contacts of particle i in destination
@@ -294,7 +274,7 @@ class RigidBodyCollision2DCundallStage1(Equation):
                     d_tng_idx_dem_id[found_at] = s_dem_id[s_idx]
 
                 # compute the damping constants
-                eta_t = 0.5 * eta_n
+                c_s = self.cs_fac * d_total_mass[d_body_id[d_idx]]**0.5
 
                 # find the tangential force from the tangential displacement
                 # and tangential velocity (eq 2.11 Thesis Ye)
@@ -313,28 +293,33 @@ class RigidBodyCollision2DCundallStage1(Equation):
                     d_tng_frc0[found_at] = ft_max
 
                 dtb2 = dt / 2.
-                d_tng_frc[found_at] += self.kt * vt * dtb2
+                d_tng_frc[found_at] += self.ks * vt * dtb2 + c_s * vt
 
                 d_fx[d_idx] += fn_x - ft * tx
                 d_fy[d_idx] += fn_y - ft * ty
 
 
 class RigidBodyCollision2DCundallStage2(Equation):
-    def __init__(self, dest, sources, kn=1e3, mu=0.5, en=0.8):
+    def __init__(self, dest, sources, kn=1e7, alpha_n=0.3, nu=0.3, mu=0.5):
+        """
+        kn: Normal spring stiffness
+        alpha_n: damping ration
+        nu: Poisson ratio
+        mu: friction coefficient
+        """
         self.kn = kn
-        self.kt = 2. / 7. * kn
-        self.kt_1 = 1. / self.kt
-        self.en = en
-        self.et = 0.5 * self.en
+        self.ks = kn / (2 * (1 + nu))
+        self.alpha_n = alpha_n
+        self.cn_fac = alpha_n * 2 * kn**0.5
+        self.cs_fac = self.cn_fac / (2. * (1. + nu))
+        self.nu = nu
         self.mu = mu
-        tmp = log(en)
-        self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
         super(RigidBodyCollision2DCundallStage2, self).__init__(dest, sources)
 
-    def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx,
+    def loop(self, d_idx, d_m, d_fx, d_fy, d_tng_idx, d_total_mass, d_body_id,
              d_tng_idx_dem_id, d_tng_frc, d_tng_frc0, d_total_tng_contacts,
-             d_dem_id, d_limit, VIJ, XIJ, RIJ, d_rad_s, s_idx, s_m,
-             s_rad_s, s_dem_id, dt):
+             d_dem_id, d_limit, VIJ, XIJ, RIJ, d_rad_s, s_idx, s_m, s_rad_s,
+             s_dem_id, dt):
         p, q1, tot_ctcs, j, found_at, found = declare('int', 6)
 
         if d_dem_id[d_idx] != s_dem_id[s_idx]:
@@ -365,19 +350,14 @@ class RigidBodyCollision2DCundallStage2(Equation):
                 vn = VIJ[0] * nx + VIJ[1] * ny
                 vt = VIJ[0] * tx + VIJ[1] * ty
 
-                # damping force is taken from
-                # "On the Determination of the Damping Coefficient
-                # of Non-linear Spring-dashpot System to Model
-                # Hertz Contact for Simulation by Discrete Element
-                # Method" paper.
-                # compute the damping constants
-                m_eff = d_m[d_idx] * s_m[s_idx] / (d_m[d_idx] + s_m[s_idx])
-                eta_n = self.alpha * sqrt(m_eff)
+                # taken from "Simulation of solid–fluid mixture flow using
+                # moving particle methods"
+                c_n = self.cn_fac * d_total_mass[d_body_id[d_idx]]**2.
 
                 # normal force
                 kn_overlap = self.kn * overlap
-                fn_x = -kn_overlap * nx - eta_n * vn * nx
-                fn_y = -kn_overlap * ny - eta_n * vn * ny
+                fn_x = -kn_overlap * nx - c_n * vn * nx
+                fn_y = -kn_overlap * ny - c_n * vn * ny
 
                 # ------------- tangential force computation ----------------
                 # total number of contacts of particle i in destination
@@ -402,7 +382,8 @@ class RigidBodyCollision2DCundallStage2(Equation):
                 # tracking history.
                 ft = 0.
                 if found == 1:
-                    eta_t = 0.5 * eta_n
+                    # compute the damping constants
+                    c_s = self.cs_fac * sqrt(d_total_mass[d_body_id[d_idx]])
 
                     # find the tangential force from the tangential displacement
                     # and tangential velocity (eq 2.11 Thesis Ye)
@@ -411,7 +392,8 @@ class RigidBodyCollision2DCundallStage2(Equation):
                     # don't check for Coulomb limit as we are dealing with
                     # RK2 integrator
 
-                    d_tng_frc[found_at] = d_tng_frc0[found_at] + self.kt * vt * dt
+                    d_tng_frc[found_at] = (
+                        d_tng_frc0[found_at] + self.ks * vt * dt + c_s * vt)
 
                 d_fx[d_idx] += fn_x - ft * tx
                 d_fy[d_idx] += fn_y - ft * ty
@@ -497,7 +479,77 @@ class UpdateTangentialContactsCundall2dPaticleParticle(Equation):
                 count += 1
 
 
-def get_particle_array_rigid_body_quaternion(constants=None, **props):
+class RK2StepRigidBodyDEMCundall(IntegratorStep):
+    def initialize(self, d_idx, d_x, d_y, d_z, d_x0, d_y0, d_z0, d_omega,
+                   d_omega0, d_vc, d_vc0, d_num_body, d_total_tng_contacts,
+                   d_limit, d_tng_frc, d_tng_frc0):
+        _i = declare('int')
+        _j = declare('int')
+        base = declare('int')
+        if d_idx == 0:
+            for _i in range(d_num_body[0]):
+                base = 3 * _i
+                for _j in range(3):
+                    d_vc0[base + _j] = d_vc[base + _j]
+                    d_omega0[base + _j] = d_omega[base + _j]
+
+        d_x0[d_idx] = d_x[d_idx]
+        d_y0[d_idx] = d_y[d_idx]
+        d_z0[d_idx] = d_z[d_idx]
+
+        # -----------------------------------------------
+        # save the initial tangential contact information
+        # -----------------------------------------------
+        i = declare('int')
+        p = declare('int')
+        q = declare('int')
+        tot_ctcs = declare('int')
+        tot_ctcs = d_total_tng_contacts[d_idx]
+        p = d_idx * d_limit[0]
+        q = p + tot_ctcs
+
+        for i in range(p, q):
+            d_tng_frc0[i] = d_tng_frc[i]
+
+    def stage1(self, d_idx, d_u, d_v, d_w, d_x, d_y, d_z, d_x0, d_y0, d_z0,
+               d_omega, d_omega_dot, d_vc, d_ac, d_omega0, d_vc0, d_num_body,
+               d_total_tng_contacts, d_limit, dt=0.0):
+        dtb2 = 0.5 * dt
+        _i = declare('int')
+        j = declare('int')
+        base = declare('int')
+        if d_idx == 0:
+            for _i in range(d_num_body[0]):
+                base = 3 * _i
+                for j in range(3):
+                    d_vc[base + j] = d_vc0[base + j] + d_ac[base + j] * dtb2
+                    d_omega[base + j] = (
+                        d_omega0[base + j] + d_omega_dot[base + j] * dtb2)
+
+        d_x[d_idx] = d_x0[d_idx] + dtb2 * d_u[d_idx]
+        d_y[d_idx] = d_y0[d_idx] + dtb2 * d_v[d_idx]
+        d_z[d_idx] = d_z0[d_idx] + dtb2 * d_w[d_idx]
+
+    def stage2(self, d_idx, d_u, d_v, d_w, d_x, d_y, d_z, d_x0, d_y0, d_z0,
+               d_omega, d_omega_dot, d_vc, d_ac, d_omega0, d_vc0, d_num_body,
+               d_total_tng_contacts, d_limit, dt=0.0):
+        _i = declare('int')
+        j = declare('int')
+        base = declare('int')
+        if d_idx == 0:
+            for _i in range(d_num_body[0]):
+                base = 3 * _i
+                for j in range(3):
+                    d_vc[base + j] = d_vc0[base + j] + d_ac[base + j] * dt
+                    d_omega[base + j] = (
+                        d_omega0[base + j] + d_omega_dot[base + j] * dt)
+
+        d_x[d_idx] = d_x0[d_idx] + dt * d_u[d_idx]
+        d_y[d_idx] = d_y0[d_idx] + dt * d_v[d_idx]
+        d_z[d_idx] = d_z0[d_idx] + dt * d_w[d_idx]
+
+
+def get_particle_array_rigid_body_quaternion_cundall_2d_dem(constants=None, **props):
     extra_props = [
         'fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0', 'nx', 'ny',
         'nz', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0'
@@ -543,65 +595,16 @@ def get_particle_array_rigid_body_quaternion(constants=None, **props):
 
     setup_quaternion_rigid_body(pa)
 
+    # create the array to save the tangential interaction particles
+    # index and other variables
+    limit = 6
+    setup_rigid_body_cundall_particle_array(pa, limit)
+
     pa.set_output_arrays(['x', 'y', 'z', 'u', 'v', 'w', 'fx', 'fy', 'fz', 'm'])
     return pa
 
 
-def normalize_q_orientation(q):
-    norm_q = sqrt(q[0]**2 + q[1]**2 + q[2]**2 + q[3]**2)
-    q[:] = q[:] / norm_q
-
-
-def quaternion_multiplication(p, q, res):
-    """Parameters
-    ----------
-    p   : [float]
-          An array of length four
-    q   : [float]
-          An array of length four
-    res : [float]
-          An array of length four
-
-    Here `p` is a quaternion. i.e., p = [p.w, p.x, p.y, p.z]. And q is an
-    another quaternion.
-
-    This function is used to compute the rate of change of orientation
-    when orientation is represented in terms of a quaternion. When the
-    angular velocity is represented in terms of global frame
-    \frac{dq}{dt} = \frac{1}{2} omega q
-
-    http://www.ams.stonybrook.edu/~coutsias/papers/rrr.pdf
-    see equation 8
-
-    """
-    res[0] = (p[0] * q[0] - p[1] * q[1] - p[2] * q[2] - p[3] * q[3])
-    res[1] = (p[0] * q[1] + q[0] * p[1] + p[2] * q[3] - p[3] * q[2])
-    res[2] = (p[0] * q[2] + q[0] * p[2] + p[3] * q[1] - p[1] * q[3])
-    res[3] = (p[0] * q[3] + q[0] * p[3] + p[1] * q[2] - p[2] * q[1])
-
-
-def scale_quaternion(q, scale):
-    q[0] = q[0] * scale
-    q[1] = q[1] * scale
-    q[2] = q[2] * scale
-    q[3] = q[3] * scale
-
-
-def quaternion_to_matrix(q, matrix):
-    matrix[0] = 1. - 2. * (q[2]**2. + q[3]**2.)
-    matrix[1] = 2. * (q[1] * q[2] + q[0] * q[3])
-    matrix[2] = 2. * (q[1] * q[3] - q[0] * q[2])
-
-    matrix[3] = 2. * (q[1] * q[2] - q[0] * q[3])
-    matrix[4] = 1. - 2. * (q[1]**2. + q[3]**2.)
-    matrix[5] = 2. * (q[2] * q[3] + q[0] * q[1])
-
-    matrix[6] = 2. * (q[1] * q[3] + q[0] * q[2])
-    matrix[7] = 2. * (q[2] * q[3] - q[0] * q[1])
-    matrix[8] = 1. - 2. * (q[1]**2. + q[2]**2.)
-
-
-class RK2StepRigidBodyQuaternionsPotyondy(IntegratorStep):
+class RK2StepRigidBodyDEMCundallQuaternion(IntegratorStep):
     def py_initialize(self, dst, t, dt):
         for j in range(3):
             # save the center of mass and center of mass velocity
@@ -615,7 +618,8 @@ class RK2StepRigidBodyQuaternionsPotyondy(IntegratorStep):
         for j in range(4):
             dst.q0[j] = dst.q[j]
 
-    def initialize(self):
+    def initialize(self, d_idx, d_total_tng_contacts, d_limit, d_tng_frc,
+                   d_tng_frc0):
         # -----------------------------------------------
         # save the initial tangential contact information
         # -----------------------------------------------
@@ -628,12 +632,7 @@ class RK2StepRigidBodyQuaternionsPotyondy(IntegratorStep):
         q = p + tot_ctcs
 
         for i in range(p, q):
-            d_tng_x0[i] = d_tng_x[i]
-            d_tng_y0[i] = d_tng_y[i]
-            d_tng_z0[i] = d_tng_z[i]
-            d_tng_nx0[i] = d_tng_nx[i]
-            d_tng_ny0[i] = d_tng_ny[i]
-            d_tng_nz0[i] = d_tng_nz[i]
+            d_tng_frc0[i] = d_tng_frc[i]
 
     def py_stage1(self, dst, t, dt):
         dtb2 = dt / 2.
@@ -777,70 +776,3 @@ class RK2StepRigidBodyQuaternionsPotyondy(IntegratorStep):
         d_u[d_idx] = d_vc[0] + du
         d_v[d_idx] = d_vc[1] + dv
         d_w[d_idx] = d_vc[2] + dw
-
-
-class RigidBodyQuaternionPotyondyScheme(Scheme):
-    def __init__(self, bodies, solids, dim, rho0, kn, mu=0.5, en=1.0, gx=0.0,
-                 gy=0.0, gz=0.0, debug=False):
-        self.bodies = bodies
-        self.solids = solids
-        self.dim = dim
-        self.rho0 = rho0
-        self.kn = kn
-        self.mu = mu
-        self.en = en
-        self.gx = gx
-        self.gy = gy
-        self.gz = gz
-        self.debug = debug
-
-    def configure_solver(self, kernel=None, integrator_cls=None,
-                         extra_steppers=None, **kw):
-        from pysph.base.kernels import CubicSpline
-        from pysph.sph.integrator import EPECIntegrator
-        from pysph.solver.solver import Solver
-        if kernel is None:
-            kernel = CubicSpline(dim=self.dim)
-
-        steppers = {}
-        if extra_steppers is not None:
-            steppers.update(extra_steppers)
-
-        for body in self.bodies:
-            if body not in steppers:
-                steppers[body] = RK2StepRigidBodyQuaternions()
-
-        cls = integrator_cls if integrator_cls is not None else EPECIntegrator
-        integrator = cls(**steppers)
-
-        self.solver = Solver(dim=self.dim, integrator=integrator,
-                             kernel=kernel, **kw)
-
-    def get_equations(self):
-        from pysph.sph.equation import Group
-        equations = []
-        g1 = []
-        if self.solids is not None:
-            all = self.bodies + self.solids
-        else:
-            all = self.bodies
-
-        for name in self.bodies:
-            g1.append(
-                BodyForce(dest=name, sources=None, gx=self.gx, gy=self.gy,
-                          gz=self.gz))
-        equations.append(Group(equations=g1, real=False))
-
-        g2 = []
-        for name in self.bodies:
-            g2.append(
-                RigidBodyCollision(dest=name, sources=all, kn=self.kn,
-                                   mu=self.mu, en=self.en))
-        equations.append(Group(equations=g2, real=False))
-
-        g3 = []
-        for name in self.bodies:
-            g3.append(SumUpExternalForces(dest=name, sources=None))
-        equations.append(Group(equations=g3, real=False))
-
-        return equations
