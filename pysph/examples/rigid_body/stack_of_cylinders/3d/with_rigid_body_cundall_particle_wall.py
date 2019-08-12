@@ -22,13 +22,16 @@ from pysph.solver.application import Application
 
 from pysph.sph.rigid_body import (BodyForce)
 
-from pysph.sph.rigid_body_cundall_2d import (
-    get_particle_array_rigid_body_cundall_dem_2d,
-    RigidBodyCollision2DCundallParticleParticleStage1,
-    RigidBodyCollision2DCundallParticleParticleStage2,
-    UpdateTangentialContactsCundall2dPaticleParticle,
-    SumUpExternalForces,
-    RK2StepRigidBodyQuaternionsDEMCundall2d)
+from pysph.sph.rigid_body_cundall_2d import (SumUpExternalForces)
+from pysph.sph.rigid_body_cundall_3d import (
+    get_particle_array_rigid_body_cundall_dem_3d,
+    RigidBodyCollision3DCundallParticleParticleStage1,
+    RigidBodyCollision3DCundallParticleParticleStage2,
+    RigidBodyCollision3DCundallParticleWallStage1,
+    RigidBodyCollision3DCundallParticleWallStage2,
+    UpdateTangentialContactsCundall3dPaticleParticle,
+    UpdateTangentialContactsCundall3dPaticleWall,
+    RK2StepRigidBodyQuaternionsDEMCundall3d)
 from pysph.tools.geometry import (get_2d_tank)
 
 
@@ -72,7 +75,6 @@ class ZhangStackOfCylinders(Application):
         self.wall_height = 20 * 1e-2
         self.wall_spacing = 1e-3
         self.wall_layers = 2
-        # self.wall_time = 0.01
         self.wall_time = 0.1
         self.wall_rho = 2000.
 
@@ -81,7 +83,7 @@ class ZhangStackOfCylinders(Application):
         self.alpha = 0.1
 
         # solver data
-        self.tf = 0.5 + self.wall_time
+        self.tf = 1.0 + self.wall_time
         self.dt = 4e-5
         self.dim = 2
         self.seval = None
@@ -93,22 +95,30 @@ class ZhangStackOfCylinders(Application):
         h = self.hdx * self.cylinder_radius
         rad_s = self.cylinder_spacing / 2.
         V = self.cylinder_spacing**2
-        cylinders = get_particle_array_rigid_body_cundall_dem_2d(
+        cylinders = get_particle_array_rigid_body_cundall_dem_3d(
             x=xc, y=yc, h=h, m=m, rho=self.cylinder_rho, rad_s=rad_s, V=V,
             body_id=body_id, dem_id=body_id, name="cylinders")
 
-        xd, yd = self.create_dam()
-        dam = get_particle_array(x=xd, y=yd, h=h, m=m, rho=self.dam_rho,
+        xd = np.array([0., 0., 0.26])
+        yd = np.array([0., 0.02, 0.])
+        nxd = np.array([0, 1.0, -1.0])
+        nyd = np.array([1., 0., 0.])
+        dam = get_particle_array(x=xd, y=yd, nx=nxd, ny=nyd, nz=0.,
                                  rad_s=self.dam_spacing / 2.,
-                                 V=self.dam_spacing**2, name="dam")
+                                 constants={'np': len(xd)},
+                                 name="dam")
         dam.add_property('dem_id', type='int', data=max(body_id) + 1)
 
-        xw, yw = self.create_wall()
-        wall = get_particle_array(x=xw, y=yw, h=h, m=m, rho=self.wall_rho,
+        # create a particle
+        xw = np.array([0.0575])
+        yw = np.array([0.0575])
+        nxw = np.array([-1.])
+        nyw = np.array([0.])
+        wall = get_particle_array(x=xw, y=yw, nx=nxw, ny=nyw, nz=0.,
                                   rad_s=self.wall_spacing / 2.,
-                                  V=self.wall_spacing**2, name="wall")
-        wall.add_property('dem_id', type='int', data=max(body_id) + 1)
-        wall.x += 0.0015
+                                  constants={'np': len(xw)},
+                                  name="wall")
+        wall.add_property('dem_id', type='int', data=max(body_id) + 2)
 
         # please run this function to know how
         # geometry looks like
@@ -125,7 +135,7 @@ class ZhangStackOfCylinders(Application):
         kernel = CubicSpline(dim=2)
 
         integrator = EPECIntegratorMultiStage(
-            cylinders=RK2StepRigidBodyQuaternionsDEMCundall2d())
+            cylinders=RK2StepRigidBodyQuaternionsDEMCundall3d())
 
         dt = self.dt
         print("DT: %s" % dt)
@@ -142,8 +152,11 @@ class ZhangStackOfCylinders(Application):
                     BodyForce(dest='cylinders', sources=None, gy=-9.81),
                 ], real=False),
             Group(equations=[
-                RigidBodyCollision2DCundallParticleParticleStage1(
-                    dest='cylinders', sources=['dam', 'wall', 'cylinders'],
+                RigidBodyCollision3DCundallParticleParticleStage1(
+                    dest='cylinders', sources=['cylinders'],
+                    kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
+                RigidBodyCollision3DCundallParticleWallStage1(
+                    dest='cylinders', sources=['dam', 'wall'],
                     kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
             ]),
             Group(equations=[
@@ -157,8 +170,11 @@ class ZhangStackOfCylinders(Application):
                     BodyForce(dest='cylinders', sources=None, gy=-9.81),
                 ], real=False),
             Group(equations=[
-                RigidBodyCollision2DCundallParticleParticleStage2(
-                    dest='cylinders', sources=['dam', 'wall', 'cylinders'],
+                RigidBodyCollision3DCundallParticleParticleStage2(
+                    dest='cylinders', sources=['cylinders'],
+                    kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
+                RigidBodyCollision3DCundallParticleWallStage2(
+                    dest='cylinders', sources=['dam', 'wall'],
                     kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
             ]),
             Group(equations=[
@@ -278,12 +294,14 @@ class ZhangStackOfCylinders(Application):
         if (T - dt / 2) < t < (T + dt / 2):
             for pa in self.particles:
                 if pa.name == 'wall':
-                    pa.y += 14 * 1e-2
+                    pa.x += 0.25
 
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2dPaticleParticle(
-                    dest='cylinders', sources=["cylinders", "wall", "dam"])
+                UpdateTangentialContactsCundall3dPaticleParticle(
+                    dest='cylinders', sources=["cylinders"]),
+                UpdateTangentialContactsCundall3dPaticleWall(
+                    dest='cylinders', sources=["wall", "dam"])
             ])
         ]
         arrays = self.particles

@@ -22,13 +22,13 @@ from pysph.solver.application import Application
 
 from pysph.sph.rigid_body import (BodyForce)
 
-from pysph.sph.rigid_body_cundall_2d import (
-    get_particle_array_rigid_body_cundall_dem_2d,
-    RigidBodyCollision2DCundallParticleParticleStage1,
-    RigidBodyCollision2DCundallParticleParticleStage2,
-    UpdateTangentialContactsCundall2dPaticleParticle,
-    SumUpExternalForces,
-    RK2StepRigidBodyQuaternionsDEMCundall2d)
+from pysph.sph.rigid_body_cundall_2d import (SumUpExternalForces)
+from pysph.sph.rigid_body_cundall_3d import (
+    get_particle_array_rigid_body_cundall_dem_3d,
+    RigidBodyCollision3DCundallParticleParticleStage1,
+    RigidBodyCollision3DCundallParticleParticleStage2,
+    UpdateTangentialContactsCundall3dPaticleParticle,
+    RK2StepRigidBodyQuaternionsDEMCundall3d)
 from pysph.tools.geometry import (get_2d_tank)
 
 
@@ -93,7 +93,7 @@ class ZhangStackOfCylinders(Application):
         h = self.hdx * self.cylinder_radius
         rad_s = self.cylinder_spacing / 2.
         V = self.cylinder_spacing**2
-        cylinders = get_particle_array_rigid_body_cundall_dem_2d(
+        cylinders = get_particle_array_rigid_body_cundall_dem_3d(
             x=xc, y=yc, h=h, m=m, rho=self.cylinder_rho, rad_s=rad_s, V=V,
             body_id=body_id, dem_id=body_id, name="cylinders")
 
@@ -125,7 +125,7 @@ class ZhangStackOfCylinders(Application):
         kernel = CubicSpline(dim=2)
 
         integrator = EPECIntegratorMultiStage(
-            cylinders=RK2StepRigidBodyQuaternionsDEMCundall2d())
+            cylinders=RK2StepRigidBodyQuaternionsDEMCundall3d())
 
         dt = self.dt
         print("DT: %s" % dt)
@@ -142,7 +142,7 @@ class ZhangStackOfCylinders(Application):
                     BodyForce(dest='cylinders', sources=None, gy=-9.81),
                 ], real=False),
             Group(equations=[
-                RigidBodyCollision2DCundallParticleParticleStage1(
+                RigidBodyCollision3DCundallParticleParticleStage1(
                     dest='cylinders', sources=['dam', 'wall', 'cylinders'],
                     kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
             ]),
@@ -157,7 +157,7 @@ class ZhangStackOfCylinders(Application):
                     BodyForce(dest='cylinders', sources=None, gy=-9.81),
                 ], real=False),
             Group(equations=[
-                RigidBodyCollision2DCundallParticleParticleStage2(
+                RigidBodyCollision3DCundallParticleParticleStage2(
                     dest='cylinders', sources=['dam', 'wall', 'cylinders'],
                     kn=1e7, alpha_n=0.3, nu=0.3, mu=0.1),
             ]),
@@ -282,7 +282,7 @@ class ZhangStackOfCylinders(Application):
 
         eqs1 = [
             Group(equations=[
-                UpdateTangentialContactsCundall2dPaticleParticle(
+                UpdateTangentialContactsCundall3dPaticleParticle(
                     dest='cylinders', sources=["cylinders", "wall", "dam"])
             ])
         ]

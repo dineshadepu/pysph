@@ -75,8 +75,7 @@ class ZhangStackOfCylinders(Application):
         self.wall_height = 20 * 1e-2
         self.wall_spacing = 1e-3
         self.wall_layers = 2
-        # self.wall_time = 0.01
-        self.wall_time = 0.01
+        self.wall_time = 0.1
         self.wall_rho = 2000.
 
         # simulation properties
@@ -84,7 +83,7 @@ class ZhangStackOfCylinders(Application):
         self.alpha = 0.1
 
         # solver data
-        self.tf = 0.5 + self.wall_time
+        self.tf = 1.0 + self.wall_time
         self.dt = 4e-5
         self.dim = 2
         self.seval = None
