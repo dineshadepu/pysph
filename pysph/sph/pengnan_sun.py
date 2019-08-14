@@ -86,7 +86,7 @@ class MomentumEquationFluid(Equation):
         d_aw[d_idx] = 0.0
 
     def loop(self, d_idx, d_V, d_au, d_av, d_aw, s_V, d_p, s_p, DWIJ, s_idx,
-             d_m, R2IJ, XIJ, EPS, VIJ, d_nu, s_nu, d_rho, s_rho, HIJ):
+             d_m, R2IJ, XIJ, EPS, VIJ, d_rho, s_rho, HIJ):
         p_ij = (s_rho[s_idx] * d_p[d_idx] + d_rho[d_idx] * s_p[s_idx]) / (
             d_rho[d_idx] * s_rho[s_idx])
         uijdotxij = XIJ[0] * VIJ[0] + XIJ[1] * VIJ[1] + XIJ[2] * VIJ[2]
@@ -95,7 +95,7 @@ class MomentumEquationFluid(Equation):
         # artificial viscosity coefficient
         pi_ij = uijdotxij / tmp2
         mi_1 = 1. / d_m[d_idx]
-        tmp1 = self.alpha * HIJ * self.c0 * self.r0 / d_rho[d_idx] * pi_ij
+        tmp1 = self.alpha * HIJ * self.c0 * self.rho0 / d_rho[d_idx] * pi_ij
 
         factor = (d_V[d_idx]**2. + s_V[s_idx]**2.) * p_ij
         d_au[d_idx] += (-mi_1 * factor * DWIJ[0]) + (
@@ -112,10 +112,10 @@ class MomentumEquationSolid(Equation):
         self.alpha = alpha
         self.rho0 = rho0
         self.dim = dim
-        super(MomentumEquationFluid, self).__init__(dest, sources)
+        super(MomentumEquationSolid, self).__init__(dest, sources)
 
     def loop(self, d_idx, d_V, d_u, d_v, d_w, d_au, d_av, d_aw, s_V, d_p, s_p,
-             DWIJ, s_idx, d_m, R2IJ, XIJ, EPS, d_nu, s_nu, d_rho, s_rho, HIJ,
+             DWIJ, s_idx, d_m, R2IJ, XIJ, EPS, d_rho, s_rho, HIJ,
              s_ug, s_vg, s_wg):
         p_ij = (s_rho[s_idx] * d_p[d_idx] + d_rho[d_idx] * s_p[s_idx]) / (
             d_rho[d_idx] * s_rho[s_idx])
@@ -129,7 +129,7 @@ class MomentumEquationSolid(Equation):
         # artificial viscosity coefficient
         pi_ij = uijdotxij / tmp2
         mi_1 = 1. / d_m[d_idx]
-        tmp1 = self.alpha * HIJ * self.c0 * self.r0 / d_rho[d_idx] * pi_ij
+        tmp1 = self.alpha * HIJ * self.c0 * self.rho0 / d_rho[d_idx] * pi_ij
 
         factor = (d_V[d_idx]**2. + s_V[s_idx]**2.) * p_ij
         d_au[d_idx] += (-mi_1 * factor * DWIJ[0]) + (
@@ -170,6 +170,7 @@ class SolidWallPressureBC(Equation):
         self.gy = gy
         self.gz = gz
         self.c0_1_2 = 1. / c0**2
+        self.rho0 = rho0
 
         super(SolidWallPressureBC, self).__init__(dest, sources)
 
@@ -265,7 +266,7 @@ class PengwanRigidFluidForce(Equation):
         d_fz[d_idx] += tmp * DWIJ[2]
 
 
-class PengwanFluidStep(IntegratorStep):
+class RK2PengwanFluidStep(IntegratorStep):
     def initialize(self, d_idx, d_x0, d_y0, d_z0, d_x, d_y, d_z, d_u0, d_v0,
                    d_w0, d_u, d_v, d_w, d_rho0, d_rho):
         d_x0[d_idx] = d_x[d_idx]
