@@ -1,8 +1,6 @@
-"""Water entry of 2-D cylinder.
+"""A sphere of density 500 falling into a hydrostatic tank (15 minutes)
 
-This is taken from the "Numerical simulation of interactions between free
-surface and rigid body using a robust SPH method", from section =3.1.3=.
-
+Check basic equations of SPH to throw a ball inside the vessel
 """
 from __future__ import print_function
 import numpy as np
@@ -23,7 +21,49 @@ from pysph.solver.application import Application
 from pysph.sph.rigid_body import (
     BodyForce, SummationDensityBoundary, RigidBodyCollision, RigidBodyMoments,
     RigidBodyMotion, AkinciRigidFluidCoupling, RK2StepRigidBody)
-from pysph.tools.geometry_rigid_fluid import get_2d_hydrostatic_tank
+
+from pysph.sph.rigid_body import (
+    BodyForce, SummationDensityBoundary, RigidBodyCollision, RigidBodyMoments,
+    RigidBodyMotion, AkinciRigidFluidCoupling, RK2StepRigidBody)
+
+
+def create_boundary():
+    dx = 2
+
+    # bottom particles in tank
+    xb = np.arange(-2 * dx, 100 + 2 * dx, dx)
+    yb = np.arange(-2 * dx, 0, dx)
+    xb, yb = np.meshgrid(xb, yb)
+    xb = xb.ravel()
+    yb = yb.ravel()
+
+    xl = np.arange(-2 * dx, 0, dx)
+    yl = np.arange(0, 250, dx)
+    xl, yl = np.meshgrid(xl, yl)
+    xl = xl.ravel()
+    yl = yl.ravel()
+
+    xr = np.arange(100, 100 + 2 * dx, dx)
+    yr = np.arange(0, 250, dx)
+    xr, yr = np.meshgrid(xr, yr)
+    xr = xr.ravel()
+    yr = yr.ravel()
+
+    x = np.concatenate([xl, xb, xr])
+    y = np.concatenate([yl, yb, yr])
+
+    return x * 1e-3, y * 1e-3
+
+
+def create_fluid():
+    dx = 2
+    xf = np.arange(0, 100, dx)
+    yf = np.arange(0, 150, dx)
+    xf, yf = np.meshgrid(xf, yf)
+    xf = xf.ravel()
+    yf = yf.ravel()
+
+    return xf * 1e-3, yf * 1e-3
 
 
 def create_sphere(dx=1):
@@ -42,21 +82,37 @@ def create_sphere(dx=1):
     return x * 1e-3, y * 1e-3
 
 
+def get_density(y):
+    height = 150
+    c_0 = 2 * np.sqrt(2 * 9.81 * height * 1e-3)
+    rho_0 = 1000
+    height_water_clmn = height * 1e-3
+    gamma = 7.
+    _tmp = gamma / (rho_0 * c_0**2)
+
+    rho = np.zeros_like(y)
+    for i in range(len(rho)):
+        p_i = rho_0 * 9.81 * (height_water_clmn - y[i])
+        rho[i] = rho_0 * (1 + p_i * _tmp)**(1. / gamma)
+    return rho
+
+
 def geometry():
     import matplotlib.pyplot as plt
     # please run this function to know how
     # geometry looks like
-    xt, yt, xf, yf = get_2d_hydrostatic_tank()
+    x_tank, y_tank = create_boundary()
+    x_fluid, y_fluid = create_fluid()
     x_cube, y_cube = create_sphere()
-    plt.scatter(xf, yf)
-    plt.scatter(xf, yt)
+    plt.scatter(x_fluid, y_fluid)
+    plt.scatter(x_tank, y_tank)
     plt.scatter(x_cube, y_cube)
     plt.axes().set_aspect('equal', 'datalim')
     print("done")
     plt.show()
 
 
-class WaterEntry2dCylinder(Application):
+class RigidFluidCoupling(Application):
     def initialize(self):
         self.dx = 2 * 1e-3
         self.hdx = 1.2
@@ -67,20 +123,21 @@ class WaterEntry2dCylinder(Application):
         self.alpha = 0.1
 
     def create_particles(self):
-        xt, yt, xf, yf = get_2d_hydrostatic_tank()
-
-        # create fluid
+        """Create the circular patch of fluid."""
+        xf, yf = create_fluid()
         m = self.ro * self.dx * self.dx
         rho = self.ro
         h = self.hdx * self.dx
         fluid = get_particle_array_wcsph(x=xf, y=yf, h=h, m=m, rho=rho,
                                          name="fluid")
 
+        dx = 2
+        xt, yt = create_boundary()
         m = 1000 * self.dx * self.dx
         rho = 1000
         rad_s = 2 / 2. * 1e-3
         h = self.hdx * self.dx
-        V = self.dx**2.
+        V = dx * dx * 1e-6
         tank = get_particle_array_wcsph(x=xt, y=yt, h=h, m=m, rho=rho,
                                         rad_s=rad_s, V=V, name="tank")
         for name in ['fx', 'fy', 'fz']:
@@ -92,7 +149,7 @@ class WaterEntry2dCylinder(Application):
         rho = self.solid_rho
         h = self.hdx * self.dx
         rad_s = dx / 2. * 1e-3
-        V = dx**2.
+        V = dx * dx * 1e-6
         cs = 0.0
         cube = get_particle_array_rigid_body(x=xc, y=yc, h=h, m=m, rho=rho,
                                              rad_s=rad_s, V=V, cs=cs,
@@ -143,11 +200,11 @@ class WaterEntry2dCylinder(Application):
                 RigidBodyCollision(dest='cube', sources=['tank'], kn=1e5)
             ]),
             Group(equations=[RigidBodyMoments(dest='cube', sources=None)]),
-            Group(equations=[RigidBodyMotion(dest='cube', sources=None)])
+            Group(equations=[RigidBodyMotion(dest='cube', sources=None)]),
         ]
         return equations
 
 
 if __name__ == '__main__':
-    app = WaterEntry2dCylinder()
+    app = RigidFluidCoupling()
     app.run()

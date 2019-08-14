@@ -1,3 +1,9 @@
+"""
+
+Taken from
+An accurate and efficient SPH modeling of the water entry of circular cylinders
+
+"""
 from pysph.sph.equation import Equation
 from pysph.base.utils import get_particle_array
 from pysph.sph.integrator_step import IntegratorStep
@@ -6,7 +12,7 @@ from pysph.sph.integrator_step import IntegratorStep
 def get_particle_array_fluid_pengnan(constants=None, **props):
     extra_props = [
         'cs', 'ax', 'ay', 'az', 'arho', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0',
-        'rho0', 'div', 'dt_cfl', 'dt_force'
+        'rho0', 'div',
     ]
 
     pa = get_particle_array(constants=constants, additional_props=extra_props,
@@ -73,17 +79,21 @@ class ContinuityEquationSolid(Equation):
 
 
 class MomentumEquationFluid(Equation):
-    def __init__(self, dest, sources, alpha, c0, rho0, dim, nu=0.0):
+    def __init__(self, dest, sources, alpha, c0, rho0, dim, nu=0.0, gx=0.,
+                 gy=0., gz=0.):
         self.c0 = c0
         self.alpha = alpha
         self.rho0 = rho0
         self.dim = dim
+        self.gx = gx
+        self.gy = gy
+        self.gz = gz
         super(MomentumEquationFluid, self).__init__(dest, sources)
 
     def initialize(self, d_au, d_av, d_aw, d_idx):
-        d_au[d_idx] = 0.0
-        d_av[d_idx] = 0.0
-        d_aw[d_idx] = 0.0
+        d_au[d_idx] = self.gx
+        d_av[d_idx] = self.gy
+        d_aw[d_idx] = self.gz
 
     def loop(self, d_idx, d_V, d_au, d_av, d_aw, s_V, d_p, s_p, DWIJ, s_idx,
              d_m, R2IJ, XIJ, EPS, VIJ, d_rho, s_rho, HIJ):
@@ -115,8 +125,8 @@ class MomentumEquationSolid(Equation):
         super(MomentumEquationSolid, self).__init__(dest, sources)
 
     def loop(self, d_idx, d_V, d_u, d_v, d_w, d_au, d_av, d_aw, s_V, d_p, s_p,
-             DWIJ, s_idx, d_m, R2IJ, XIJ, EPS, d_rho, s_rho, HIJ,
-             s_ug, s_vg, s_wg):
+             DWIJ, s_idx, d_m, R2IJ, XIJ, EPS, d_rho, s_rho, HIJ, s_ug, s_vg,
+             s_wg):
         p_ij = (s_rho[s_idx] * d_p[d_idx] + d_rho[d_idx] * s_p[s_idx]) / (
             d_rho[d_idx] * s_rho[s_idx])
 
@@ -148,7 +158,7 @@ class StateEquation(Equation):
         super(StateEquation, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_p, d_rho):
-        d_p[d_idx] = self.c0_2 * (d_rho[d_idx] - self.rho0)
+        d_p[d_idx] = self.c0_2 * max(0., d_rho[d_idx] - self.rho0)
 
 
 class SourceNumberDensity(Equation):
@@ -193,7 +203,7 @@ class SolidWallPressureBC(Equation):
         if d_wij[d_idx] > 1e-14:
             d_p[d_idx] /= d_wij[d_idx]
 
-        d_rho[d_idx] = d_p[d_idx] / self.c0_1_2 + self.rho0
+        d_rho[d_idx] = d_p[d_idx] * self.c0_1_2 + self.rho0
         d_V[d_idx] = d_m[d_idx] / d_rho[d_idx]
 
 
@@ -282,27 +292,26 @@ class RK2PengwanFluidStep(IntegratorStep):
     def stage1(self, d_idx, d_x0, d_y0, d_z0, d_x, d_y, d_z, d_u0, d_v0, d_w0,
                d_u, d_v, d_w, d_rho0, d_rho, d_au, d_av, d_aw, d_arho, dt):
         dtb2 = 0.5 * dt
-        d_u[d_idx] = d_u0[d_idx] + dtb2 * d_au[d_idx]
-        d_v[d_idx] = d_v0[d_idx] + dtb2 * d_av[d_idx]
-        d_w[d_idx] = d_w0[d_idx] + dtb2 * d_aw[d_idx]
-
         d_x[d_idx] = d_x0[d_idx] + dtb2 * d_u[d_idx]
         d_y[d_idx] = d_y0[d_idx] + dtb2 * d_v[d_idx]
         d_z[d_idx] = d_z0[d_idx] + dtb2 * d_w[d_idx]
+
+        d_u[d_idx] = d_u0[d_idx] + dtb2 * d_au[d_idx]
+        d_v[d_idx] = d_v0[d_idx] + dtb2 * d_av[d_idx]
+        d_w[d_idx] = d_w0[d_idx] + dtb2 * d_aw[d_idx]
 
         # Update densities and smoothing lengths from the accelerations
         d_rho[d_idx] = d_rho0[d_idx] + dtb2 * d_arho[d_idx]
 
     def stage2(self, d_idx, d_x0, d_y0, d_z0, d_x, d_y, d_z, d_u0, d_v0, d_w0,
                d_u, d_v, d_w, d_rho0, d_rho, d_au, d_av, d_aw, d_arho, dt):
+        d_x[d_idx] = d_x0[d_idx] + dt * d_u[d_idx]
+        d_y[d_idx] = d_y0[d_idx] + dt * d_v[d_idx]
+        d_z[d_idx] = d_z0[d_idx] + dt * d_w[d_idx]
 
         d_u[d_idx] = d_u0[d_idx] + dt * d_au[d_idx]
         d_v[d_idx] = d_v0[d_idx] + dt * d_av[d_idx]
         d_w[d_idx] = d_w0[d_idx] + dt * d_aw[d_idx]
-
-        d_x[d_idx] = d_x0[d_idx] + dt * d_u[d_idx]
-        d_y[d_idx] = d_y0[d_idx] + dt * d_v[d_idx]
-        d_z[d_idx] = d_z0[d_idx] + dt * d_w[d_idx]
 
         # Update densities and smoothing lengths from the accelerations
         d_rho[d_idx] = d_rho0[d_idx] + dt * d_arho[d_idx]
