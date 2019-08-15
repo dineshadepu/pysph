@@ -57,18 +57,18 @@ class ContinuityEquationSolid(Equation):
         self.alpha = alpha
         super(ContinuityEquationSolid, self).__init__(dest, sources)
 
-    def initialize(self, d_idx, d_arho):
-        d_arho[d_idx] = 0.0
-
-    def loop(self, d_idx, d_rho, d_arho, s_idx, s_m, s_rho, DWIJ, VIJ, XIJ,
-             R2IJ, HIJ):
+    def loop(self, d_idx, d_rho, d_arho, d_u, d_v, d_w, s_ug, s_vg, s_wg,
+             s_idx, s_m, s_rho, DWIJ, XIJ, R2IJ, HIJ):
         tmp1 = d_rho[d_idx] - s_rho[s_idx]
         tmp2 = R2IJ + (0.01 * HIJ)**2.
         tmp = tmp1 / tmp2
         psi_ijdotdwij = tmp * (
             XIJ[0] * DWIJ[0] + XIJ[1] * DWIJ[1] + XIJ[2] * DWIJ[2])
 
-        vijdotdwij = DWIJ[0] * VIJ[0] + DWIJ[1] * VIJ[1] + DWIJ[2] * VIJ[2]
+        uij = d_u[d_idx] - s_ug[s_idx]
+        vij = d_v[d_idx] - s_vg[s_idx]
+        wij = d_w[d_idx] - s_wg[s_idx]
+        vijdotdwij = DWIJ[0] * uij + DWIJ[1] * vij + DWIJ[2] * wij
 
         d_arho[d_idx] += vijdotdwij * s_m[s_idx]
 
@@ -134,13 +134,17 @@ class MomentumEquationSolid(Equation):
         self.gz = gz
         super(MomentumEquationSolid, self).__init__(dest, sources)
 
-    def loop(self, d_idx, s_idx, d_rho, d_cs, d_p, d_au, d_av, d_aw, s_m,
-             s_rho, s_cs, s_p, VIJ, XIJ, HIJ, R2IJ, EPS, DWIJ, WIJ):
+    def loop(self, d_idx, s_idx, d_rho, d_p, d_au, d_av, d_aw, d_u, d_v,
+             d_w, s_ug, s_vg, s_wg, s_m, s_rho, s_p, XIJ, HIJ, R2IJ, EPS,
+             DWIJ, WIJ):
 
         rhoi21 = 1.0 / (d_rho[d_idx] * d_rho[d_idx])
         rhoj21 = 1.0 / (s_rho[s_idx] * s_rho[s_idx])
 
-        vijdotxij = VIJ[0] * XIJ[0] + VIJ[1] * XIJ[1] + VIJ[2] * XIJ[2]
+        uij = d_u[d_idx] - s_ug[s_idx]
+        vij = d_v[d_idx] - s_vg[s_idx]
+        wij = d_w[d_idx] - s_wg[s_idx]
+        vijdotxij = XIJ[0] * uij + XIJ[1] * vij + XIJ[2] * wij
 
         piij = 0.0
         if vijdotxij < 0:
@@ -158,6 +162,30 @@ class MomentumEquationSolid(Equation):
         d_au[d_idx] += -s_m[s_idx] * (tmp + piij * tmp1) * DWIJ[0]
         d_av[d_idx] += -s_m[s_idx] * (tmp + piij * tmp1) * DWIJ[1]
         d_aw[d_idx] += -s_m[s_idx] * (tmp + piij * tmp1) * DWIJ[2]
+
+
+class RigidFluidForce(Equation):
+    def loop(self, d_idx, s_idx, d_m, d_rho, d_p, d_fx, d_fy, d_fz, s_m,
+             s_rho, s_p, VIJ, XIJ, HIJ, R2IJ, DWIJ, WIJ):
+
+        rhoi21 = 1.0 / (d_rho[d_idx] * d_rho[d_idx])
+        rhoj21 = 1.0 / (s_rho[s_idx] * s_rho[s_idx])
+
+        vijdotxij = VIJ[0] * XIJ[0] + VIJ[1] * XIJ[1] + VIJ[2] * XIJ[2]
+
+        piij = 0.0
+        if vijdotxij < 0:
+            piij = vijdotxij / (R2IJ + (0.01 * HIJ**2.))
+
+        tmpi = d_p[d_idx] * rhoi21
+        tmpj = s_p[s_idx] * rhoj21
+
+        # gradient and correction terms
+        tmp = tmpi + tmpj
+
+        d_fx[d_idx] += d_m[d_idx]*s_m[s_idx] * (tmp + piij * tmp) * DWIJ[0]
+        d_fy[d_idx] += d_m[d_idx]*s_m[s_idx] * (tmp + piij * tmp) * DWIJ[1]
+        d_fz[d_idx] += d_m[d_idx]*s_m[s_idx] * (tmp + piij * tmp) * DWIJ[2]
 
 
 class StateEquation(Equation):
@@ -208,12 +236,54 @@ class SolidWallPressureBC(Equation):
 
         d_p[d_idx] += s_p[s_idx] * WIJ + s_rho[s_idx] * gdotxij * WIJ
 
-    def post_loop(self, d_idx, d_wij, d_p, d_rho, d_V, d_m):
+    def post_loop(self, d_idx, d_wij, d_p, d_rho, d_m):
         # extrapolated pressure at the ghost particle
         if d_wij[d_idx] > 1e-14:
             d_p[d_idx] /= d_wij[d_idx]
 
         d_rho[d_idx] = d_p[d_idx] * self.c0_1_2 + self.rho0
+
+
+class SetNoSlipWallVelocity(Equation):
+    def initialize(self, d_idx, d_uf, d_vf, d_wf):
+        d_uf[d_idx] = 0.0
+        d_vf[d_idx] = 0.0
+        d_wf[d_idx] = 0.0
+
+    def loop(self, d_idx, s_idx, d_uf, d_vf, d_wf, s_u, s_v, s_w, WIJ):
+        # sum in Eq. (22)
+        # this will be normalized in post loop
+        d_uf[d_idx] += s_u[s_idx] * WIJ
+        d_vf[d_idx] += s_v[s_idx] * WIJ
+        d_wf[d_idx] += s_w[s_idx] * WIJ
+
+    def post_loop(self, d_uf, d_vf, d_wf, d_wij, d_idx, d_ug, d_vg, d_wg, d_u,
+                  d_v, d_w):
+
+        # calculation is done only for the relevant boundary particles.
+        # d_wij (and d_uf) is 0 for particles sufficiently away from the
+        # solid-fluid interface
+
+        # Note that d_wij is already computed for the pressure BC.
+        if d_wij[d_idx] > 1e-12:
+            d_uf[d_idx] /= d_wij[d_idx]
+            d_vf[d_idx] /= d_wij[d_idx]
+            d_wf[d_idx] /= d_wij[d_idx]
+
+        # Dummy velocities at the ghost points using Eq. (23),
+        # d_u, d_v, d_w are the prescribed wall velocities.
+        d_ug[d_idx] = 2 * d_u[d_idx] - d_uf[d_idx]
+        d_vg[d_idx] = 2 * d_v[d_idx] - d_vf[d_idx]
+        d_wg[d_idx] = 2 * d_w[d_idx] - d_wf[d_idx]
+
+
+class SetFreeSlipWallVelocity(Equation):
+    def post_loop(self, d_idx, d_ug, d_vg, d_wg, d_u, d_v, d_w):
+        # Dummy velocities at the ghost points using Eq. (23),
+        # d_u, d_v, d_w are the prescribed wall velocities.
+        d_ug[d_idx] = d_u[d_idx]
+        d_vg[d_idx] = d_v[d_idx]
+        d_wg[d_idx] = d_w[d_idx]
 
 
 class RK2ChengFluidStep(IntegratorStep):
