@@ -17,11 +17,11 @@ from pysph.base.utils import get_particle_array
 from pysph.solver.application import Application
 
 from pysph.sph.equation import Group
-from pysph.sph.pengnan_sun import (
+from pysph.sph.cheng import (
     ContinuityEquationFluid, ContinuityEquationSolid, MomentumEquationFluid,
-    MomentumEquationSolid, StateEquation, get_particle_array_fluid_pengnan,
-    SourceNumberDensity, SolidWallPressureBC, SetWallVelocity,
-    RK2PengwanFluidStep)
+    MomentumEquationSolid, StateEquation, get_particle_array_fluid_cheng,
+    SourceNumberDensity, SolidWallPressureBC,
+    RK2ChengFluidStep)
 from pysph.base.kernels import QuinticSpline
 from pysph.sph.integrator_step import TransportVelocityStep
 from pysph.sph.integrator import EPECIntegrator
@@ -85,16 +85,16 @@ class DamBreak2D(Application):
         )
 
         # create pengwang particle array
-        fluid = get_particle_array_fluid_pengnan(
+        fluid = get_particle_array_fluid_cheng(
             x=fluid.x, y=fluid.y, h=self.h, m=fluid.m, rho=fluid.rho, V=0,
             name="fluid")
 
-        fluid.V[:] = self.dx**self.dim
+        # fluid.V[:] = self.dx**self.dim
 
-        boundary = get_particle_array_fluid_pengnan(
+        boundary = get_particle_array_fluid_cheng(
             x=boundary.x, y=boundary.y, h=self.h, m=boundary.m,
             rho=boundary.rho, V=0, name="boundary")
-        boundary.V[:] = self.dx**self.dim
+        # boundary.V[:] = self.dx**self.dim
 
         # add properties to tank for Adami tank boundary condition
         for prop in ('ug', 'vg', 'wg', 'uf', 'vf', 'wf', 'wij'):
@@ -104,7 +104,7 @@ class DamBreak2D(Application):
     def create_solver(self):
         kernel = CubicSpline(dim=self.dim)
 
-        integrator = EPECIntegrator(fluid=RK2PengwanFluidStep())
+        integrator = EPECIntegrator(fluid=RK2ChengFluidStep())
 
         solver = Solver(kernel=kernel, dim=self.dim, integrator=integrator,
                         dt=self.dt, tf=self.tf)
@@ -128,9 +128,9 @@ class DamBreak2D(Application):
             ]),
             Group(equations=[
                 ContinuityEquationFluid(dest='fluid', sources=['fluid'],
-                                        c0=self.c0, delta=0.2),
+                                        c0=self.c0, alpha=0.2),
                 ContinuityEquationSolid(dest='fluid', sources=['boundary'],
-                                        c0=self.c0, delta=0.2),
+                                        c0=self.c0, alpha=0.2),
                 StateEquation(dest='fluid', sources=None, c0=self.c0,
                               rho0=self.rho0),
                 MomentumEquationFluid(dest='fluid', sources=['fluid'], c0=self.
