@@ -18,7 +18,7 @@ from pysph.sph.equation import Group, MultiStageEquations
 def get_particle_array_rigid_body_cundall_dem_2d(constants=None, **props):
     extra_props = [
         'fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0', 'nx', 'ny',
-        'nz', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0'
+        'nz', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0', 'd_au', 'd_av', 'd_aw'
     ]
 
     body_id = props.pop('body_id', None)
@@ -42,6 +42,10 @@ def get_particle_array_rigid_body_cundall_dem_2d(constants=None, **props):
         'force': numpy.zeros(3 * nb, dtype=float),
         # torque about the center of mass
         'torque': numpy.zeros(3 * nb, dtype=float),
+        # linear acceleration
+        'lin_acc': numpy.zeros(3 * nb, dtype=float),
+        # angular acceleration
+        'ang_acc': numpy.zeros(3 * nb, dtype=float),
         # velocity, acceleration of CM.
         'vc': numpy.zeros(3 * nb, dtype=float),
         'vc0': numpy.zeros(3 * nb, dtype=float),
@@ -511,8 +515,8 @@ class RigidBodyCollision2DCundallParticleWallEuler(Equation):
     def initialize_pair(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy,
                         d_tng_idx, d_tng_idx_dem_id, d_total_mass, d_body_id,
                         d_tng_frc, d_tng_frc0, d_total_tng_contacts, d_dem_id,
-                        d_limit, d_rad_s, s_x, s_y, s_nx, s_ny,
-                        s_dem_id, s_np, dt):
+                        d_limit, d_rad_s, s_x, s_y, s_nx, s_ny, s_dem_id, s_np,
+                        dt):
         i, n = declare('int', 2)
         xij = declare('matrix(2)')
 
@@ -1081,8 +1085,15 @@ class RK2StepRigidBodyQuaternionsDEMCundall2d(IntegratorStep):
             omega_dot = np.matmul(dst.mig[i9:i9 + 9].reshape(3, 3), tmp)
             dst.omega[i3:i3 + 3] = dst.omega0[i3:i3 + 3] + omega_dot * dtb2
 
+            # set linear acceleration of the body
+            dst.lin_acc[i3:i3 + 3] = dst.force[i3:i3 + 3] / dst.total_mass[i]
+            # set angular acceleration
+            dst.ang_acc[i3:i3 + 3] = np.matmul(
+                dst.mig[i9:i9 + 9].reshape(3, 3), dst.torque[i3:i3 + 3])
+
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
-               d_cm, d_vc, d_R, d_omega, d_body_id):
+               d_cm, d_vc, d_R, d_omega, d_body_id, d_au, d_av, d_aw,
+               d_lin_acc, d_ang_acc):
         # some variables to update the positions seamlessly
         bid, i9, i3 = declare('int', 3)
         bid = d_body_id[d_idx]
@@ -1117,6 +1128,19 @@ class RK2StepRigidBodyQuaternionsDEMCundall2d(IntegratorStep):
         d_u[d_idx] = d_vc[i3 + 0] + du
         d_v[d_idx] = d_vc[i3 + 1] + dv
         d_w[d_idx] = d_vc[i3 + 2] + dw
+
+        # compute the acceleration of the rigid body particles
+        # ang_acc_x = d_ang_acc \cross (x_d_idx - x_com)
+        # same as
+        # ang_acc_x = d_ang_acc \cross dx
+
+        ang_acc_didx_x = d_ang_acc[i3 + 1] * dz - d_ang_acc[i3 + 2] * dy
+        ang_acc_didx_y = d_ang_acc[i3 + 2] * dx - d_ang_acc[i3 + 0] * dz
+        ang_acc_didx_z = d_ang_acc[i3 + 0] * dy - d_ang_acc[i3 + 1] * dx
+
+        d_au[d_idx] = d_lin_acc[i3 + 0] + ang_acc_didx_x
+        d_av[d_idx] = d_lin_acc[i3 + 1] + ang_acc_didx_y
+        d_aw[d_idx] = d_lin_acc[i3 + 2] + ang_acc_didx_z
 
     def py_stage2(self, dst, t, dt):
         for i in range(dst.nb[0]):
@@ -1165,8 +1189,15 @@ class RK2StepRigidBodyQuaternionsDEMCundall2d(IntegratorStep):
             omega_dot = np.matmul(dst.mig[i9:i9 + 9].reshape(3, 3), tmp)
             dst.omega[i3:i3 + 3] = dst.omega0[i3:i3 + 3] + omega_dot * dt
 
+            # set linear acceleration of the body
+            dst.lin_acc[i3:i3 + 3] = dst.force[i3:i3 + 3] / dst.total_mass[i]
+            # set angular acceleration
+            dst.ang_acc[i3:i3 + 3] = np.matmul(
+                dst.mig[i9:i9 + 9].reshape(3, 3), dst.torque[i3:i3 + 3])
+
     def stage2(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_dx0, d_dy0, d_dz0,
-               d_cm, d_vc, d_R, d_omega, d_body_id):
+               d_cm, d_vc, d_R, d_omega, d_body_id, d_au, d_av, d_aw,
+               d_lin_acc, d_ang_acc):
         # some variables to update the positions seamlessly
         bid, i9, i3 = declare('int', 3)
         bid = d_body_id[d_idx]
@@ -1201,6 +1232,19 @@ class RK2StepRigidBodyQuaternionsDEMCundall2d(IntegratorStep):
         d_u[d_idx] = d_vc[i3 + 0] + du
         d_v[d_idx] = d_vc[i3 + 1] + dv
         d_w[d_idx] = d_vc[i3 + 2] + dw
+
+        # compute the acceleration of the rigid body particles
+        # ang_acc_x = d_ang_acc \cross (x_d_idx - x_com)
+        # same as
+        # ang_acc_x = d_ang_acc \cross dx
+
+        ang_acc_didx_x = d_ang_acc[i3 + 1] * dz - d_ang_acc[i3 + 2] * dy
+        ang_acc_didx_y = d_ang_acc[i3 + 2] * dx - d_ang_acc[i3 + 0] * dz
+        ang_acc_didx_z = d_ang_acc[i3 + 0] * dy - d_ang_acc[i3 + 1] * dx
+
+        d_au[d_idx] = d_lin_acc[i3 + 0] + ang_acc_didx_x
+        d_av[d_idx] = d_lin_acc[i3 + 1] + ang_acc_didx_y
+        d_aw[d_idx] = d_lin_acc[i3 + 2] + ang_acc_didx_z
 
 
 class RigidBodyQuaternionScheme(Scheme):

@@ -83,7 +83,7 @@ class ZhangStackOfCylinders(Application):
         self.alpha = 0.1
 
         # solver data
-        self.tf = 1.0 + self.wall_time
+        self.tf = 0.5 + self.wall_time
         self.dt = 4e-5
         self.dim = 2
         self.seval = None
@@ -141,7 +141,8 @@ class ZhangStackOfCylinders(Application):
         print("DT: %s" % dt)
         tf = self.tf
         solver = Solver(kernel=kernel, dim=2, integrator=integrator, dt=dt,
-                        tf=tf)
+                        tf=tf, output_at_times=[0.1, 0.2, 0.4, 0.6],
+                        pfreq=10000000000)
 
         return solver
 
@@ -333,9 +334,9 @@ class ZhangStackOfCylinders(Application):
                 # get the system center
                 cm_x = 0
                 cm_y = 0
-                for i in range(array.n_body[0]):
-                    cm_x += array.xcm[3 * i] * array.total_mass[i]
-                    cm_y += array.xcm[3 * i + 1] * array.total_mass[i]
+                for i in range(array.nb[0]):
+                    cm_x += array.cm[3 * i] * array.total_mass[i]
+                    cm_y += array.cm[3 * i + 1] * array.total_mass[i]
                 cm_x = cm_x / np.sum(array.total_mass)
                 cm_y = cm_y / np.sum(array.total_mass)
 
@@ -363,4 +364,4 @@ if __name__ == '__main__':
     # app.create_particles()
     # app.geometry()
     app.run()
-    # app.post_process()
+    app.post_process()

@@ -18,7 +18,7 @@ from compyle.api import declare
 def get_particle_array_rigid_body_cundall_dem_3d(constants=None, **props):
     extra_props = [
         'fx', 'fy', 'fz', 'dx0', 'dy0', 'dz0', 'nx0', 'ny0', 'nz0', 'nx', 'ny',
-        'nz', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0'
+        'nz', 'x0', 'y0', 'z0', 'u0', 'v0', 'w0', 'd_au', 'd_av', 'd_aw'
     ]
 
     body_id = props.pop('body_id', None)
@@ -42,6 +42,10 @@ def get_particle_array_rigid_body_cundall_dem_3d(constants=None, **props):
         'force': numpy.zeros(3 * nb, dtype=float),
         # torque about the center of mass
         'torque': numpy.zeros(3 * nb, dtype=float),
+        # linear acceleration
+        'lin_acc': numpy.zeros(3 * nb, dtype=float),
+        # angular acceleration
+        'ang_acc': numpy.zeros(3 * nb, dtype=float),
         # velocity, acceleration of CM.
         'vc': numpy.zeros(3 * nb, dtype=float),
         'vc0': numpy.zeros(3 * nb, dtype=float),
@@ -68,7 +72,7 @@ def get_particle_array_rigid_body_cundall_dem_3d(constants=None, **props):
 
     pa.set_output_arrays([
         'x', 'y', 'z', 'u', 'v', 'w', 'rho', 'h', 'm', 'p', 'pid', 'au', 'av',
-        'aw', 'tag', 'gid', 'V', 'fx', 'fy', 'fz', 'body_id'
+        'aw', 'tag', 'gid', 'fx', 'fy', 'fz', 'body_id'
     ])
 
     return pa
