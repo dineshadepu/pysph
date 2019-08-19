@@ -134,9 +134,9 @@ class MomentumEquationSolid(Equation):
         self.gz = gz
         super(MomentumEquationSolid, self).__init__(dest, sources)
 
-    def loop(self, d_idx, s_idx, d_rho, d_p, d_au, d_av, d_aw, d_u, d_v,
-             d_w, s_ug, s_vg, s_wg, s_m, s_rho, s_p, XIJ, HIJ, R2IJ, EPS,
-             DWIJ, WIJ):
+    def loop(self, d_idx, s_idx, d_rho, d_p, d_au, d_av, d_aw, d_u, d_v, d_w,
+             s_ug, s_vg, s_wg, s_m, s_rho, s_p, XIJ, HIJ, R2IJ, EPS, DWIJ,
+             WIJ):
 
         rhoi21 = 1.0 / (d_rho[d_idx] * d_rho[d_idx])
         rhoj21 = 1.0 / (s_rho[s_idx] * s_rho[s_idx])
@@ -165,8 +165,8 @@ class MomentumEquationSolid(Equation):
 
 
 class RigidFluidForce(Equation):
-    def loop(self, d_idx, s_idx, d_m, d_rho, d_p, d_fx, d_fy, d_fz, s_m,
-             s_rho, s_p, VIJ, XIJ, HIJ, R2IJ, DWIJ, WIJ):
+    def loop(self, d_idx, s_idx, d_m, d_rho, d_p, d_fx, d_fy, d_fz, s_m, s_rho,
+             s_p, VIJ, XIJ, HIJ, R2IJ, DWIJ, WIJ):
 
         rhoi21 = 1.0 / (d_rho[d_idx] * d_rho[d_idx])
         rhoj21 = 1.0 / (s_rho[s_idx] * s_rho[s_idx])
@@ -183,9 +183,9 @@ class RigidFluidForce(Equation):
         # gradient and correction terms
         tmp = tmpi + tmpj
 
-        d_fx[d_idx] += d_m[d_idx]*s_m[s_idx] * (tmp + piij * tmp) * DWIJ[0]
-        d_fy[d_idx] += d_m[d_idx]*s_m[s_idx] * (tmp + piij * tmp) * DWIJ[1]
-        d_fz[d_idx] += d_m[d_idx]*s_m[s_idx] * (tmp + piij * tmp) * DWIJ[2]
+        d_fx[d_idx] += d_m[d_idx] * s_m[s_idx] * (tmp + piij * tmp) * DWIJ[0]
+        d_fy[d_idx] += d_m[d_idx] * s_m[s_idx] * (tmp + piij * tmp) * DWIJ[1]
+        d_fz[d_idx] += d_m[d_idx] * s_m[s_idx] * (tmp + piij * tmp) * DWIJ[2]
 
 
 class StateEquation(Equation):
@@ -258,7 +258,7 @@ class SetNoSlipWallVelocity(Equation):
         d_wf[d_idx] += s_w[s_idx] * WIJ
 
     def post_loop(self, d_uf, d_vf, d_wf, d_wij, d_idx, d_ug, d_vg, d_wg, d_u,
-                  d_v, d_w):
+                  d_v, d_w, d_normal_x, d_normal_y, d_normal_z):
 
         # calculation is done only for the relevant boundary particles.
         # d_wij (and d_uf) is 0 for particles sufficiently away from the
@@ -270,11 +270,32 @@ class SetNoSlipWallVelocity(Equation):
             d_vf[d_idx] /= d_wij[d_idx]
             d_wf[d_idx] /= d_wij[d_idx]
 
-        # Dummy velocities at the ghost points using Eq. (23),
-        # d_u, d_v, d_w are the prescribed wall velocities.
-        d_ug[d_idx] = 2 * d_u[d_idx] - d_uf[d_idx]
-        d_vg[d_idx] = 2 * d_v[d_idx] - d_vf[d_idx]
-        d_wg[d_idx] = 2 * d_w[d_idx] - d_wf[d_idx]
+            # normal component of the dummy velocity
+            tmp_u = 2 * d_u[d_idx] - d_uf[d_idx]
+            tmp_v = 2 * d_v[d_idx] - d_vf[d_idx]
+            tmp_w = 2 * d_w[d_idx] - d_wf[d_idx]
+
+            tmp_u_dot_n = (
+                tmp_u * d_normal_x[d_idx] + tmp_v * d_normal_y[d_idx] +
+                tmp_w * d_normal_z[d_idx])
+
+            vt_x = tmp_u - tmp_u_dot_n * d_normal_x[d_idx]
+            vt_y = tmp_v - tmp_u_dot_n * d_normal_y[d_idx]
+            vt_z = tmp_w - tmp_u_dot_n * d_normal_z[d_idx]
+
+            u_ext_dot_n = (d_uf[d_idx] * d_normal_x[d_idx] +
+                           d_vf[d_idx] * d_normal_y[d_idx] +
+                           d_wf[d_idx] * d_normal_z[d_idx])
+
+            # Dummy velocities at the ghost points using Eq. (23),
+            # d_u, d_v, d_w are the prescribed wall velocities.
+            d_ug[d_idx] = vt_x + u_ext_dot_n * d_normal_x[d_idx]
+            d_vg[d_idx] = vt_y + u_ext_dot_n * d_normal_y[d_idx]
+            d_wg[d_idx] = vt_z + u_ext_dot_n * d_normal_z[d_idx]
+        else:
+            d_ug[d_idx] = d_u[d_idx]
+            d_vg[d_idx] = d_v[d_idx]
+            d_wg[d_idx] = d_w[d_idx]
 
 
 class SetFreeSlipWallVelocity(Equation):

@@ -36,6 +36,8 @@ from pysph.sph.rigid_body_cundall_3d import (
     UpdateTangentialContactsCundall3dPaticleParticle,
     RK2StepRigidBodyQuaternionsDEMCundall3d)
 
+from pysph.sph.wall_normal import (ComputeNormals, SmoothNormals)
+
 
 def create_circle(diameter=1, spacing=0.05, center=None):
     dx = spacing
@@ -112,6 +114,12 @@ class RigidFluidCoupling(Application):
         tank = get_particle_array_fluid_cheng(x=xt, y=yt, h=h, m=m, rho=rho,
                                               name="tank")
 
+        tank.add_property('normal_x', stride=3)
+        tank.add_property('normal_y', stride=3)
+        tank.add_property('normal_z', stride=3)
+        tank.add_property('normal_tmp_x', stride=3)
+        tank.add_property('normal_tmp_y', stride=3)
+        tank.add_property('normal_tmp_z', stride=3)
         # add properties to tank for Adami boundary boundary condition
         for prop in ('ug', 'vg', 'wg', 'uf', 'vf', 'wf', 'wij'):
             tank.add_property(name=prop)
@@ -128,7 +136,20 @@ class RigidFluidCoupling(Application):
         cylinder = get_particle_array_rigid_body_cundall_dem_3d(
             x=xc, y=yc, h=h, m=m, rho=self.cylinder_rho, rad_s=rad_s, dem_id=1,
             name="cylinder")
-        print(cylinder.total_mass)
+
+        cylinder.add_property('normal_x', stride=3)
+        cylinder.add_property('normal_y', stride=3)
+        cylinder.add_property('normal_z', stride=3)
+        cylinder.add_property('normal_tmp_x', stride=3)
+        cylinder.add_property('normal_tmp_y', stride=3)
+        cylinder.add_property('normal_tmp_z', stride=3)
+
+        cylinder.set_output_arrays([
+            'x', 'y', 'z', 'u', 'v', 'w', 'rho', 'h', 'm', 'p', 'pid', 'au',
+            'av', 'aw', 'tag', 'gid', 'fx', 'fy', 'fz', 'body_id',
+            'normal_x', 'normal_y', 'normal_z'
+        ])
+
         # add properties to boundary for Adami boundary boundary condition
         for prop in ('ug', 'vg', 'wg', 'uf', 'vf', 'wf', 'wij'):
             cylinder.add_property(name=prop)
@@ -149,6 +170,20 @@ class RigidFluidCoupling(Application):
 
     def create_equations(self):
         stage1 = [
+            # compute the normals
+            Group(equations=[
+                ComputeNormals(dest='cylinder', sources=['cylinder'])
+            ]),
+            Group(equations=[
+                ComputeNormals(dest='tank', sources=['tank'])
+            ]),
+            Group(equations=[
+                SmoothNormals(dest='cylinder', sources=['cylinder'])
+            ]),
+            Group(equations=[
+                SmoothNormals(dest='tank', sources=['tank'])
+            ]),
+
             Group(equations=[
                 SourceNumberDensity(dest='tank', sources=['fluid']),
                 SolidWallPressureBC(dest='tank', sources=['fluid'], gy=self.gy,
@@ -186,6 +221,19 @@ class RigidFluidCoupling(Application):
         ]
 
         stage2 = [
+            # compute the normals
+            Group(equations=[
+                ComputeNormals(dest='cylinder', sources=['cylinder'])
+            ]),
+            Group(equations=[
+                ComputeNormals(dest='tank', sources=['tank'])
+            ]),
+            Group(equations=[
+                SmoothNormals(dest='cylinder', sources=['cylinder'])
+            ]),
+            Group(equations=[
+                SmoothNormals(dest='tank', sources=['tank'])
+            ]),
             Group(equations=[
                 SourceNumberDensity(dest='tank', sources=['fluid']),
                 SolidWallPressureBC(dest='tank', sources=['fluid'], gy=self.gy,
