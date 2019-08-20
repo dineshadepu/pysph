@@ -142,7 +142,7 @@ class ZhangStackOfCylinders(Application):
         tf = self.tf
         solver = Solver(kernel=kernel, dim=2, integrator=integrator, dt=dt,
                         tf=tf, output_at_times=[0.1, 0.2, 0.4, 0.6],
-                        pfreq=10000000000)
+                        pfreq=500)
 
         return solver
 
@@ -335,10 +335,10 @@ class ZhangStackOfCylinders(Application):
                 cm_x = 0
                 cm_y = 0
                 for i in range(array.nb[0]):
-                    cm_x += array.cm[3 * i] * array.total_mass[i]
-                    cm_y += array.cm[3 * i + 1] * array.total_mass[i]
-                cm_x = cm_x / np.sum(array.total_mass)
-                cm_y = cm_y / np.sum(array.total_mass)
+                    cm_x += array.cm[3 * i]
+                    cm_y += array.cm[3 * i + 1]
+                cm_x = cm_x / 33
+                cm_y = cm_y / 33
 
                 system_x.append(cm_x / self.dam_length)
                 system_y.append(cm_y / self.dam_length)
@@ -347,7 +347,19 @@ class ZhangStackOfCylinders(Application):
         t = np.asarray(t)
         t = t - np.min(t)
 
+        data = np.loadtxt('../x_com_zhang.csv', delimiter=',')
+        tx, xcom_zhang = data[:, 0], data[:, 1]
+
+        plt.scatter(tx, xcom_zhang, label='x_com zhang')
         plt.plot(t, system_x, label='system com x')
+        plt.legend()
+        plt.show()
+        plt.clf()
+
+        data = np.loadtxt('../y_com_zhang.csv', delimiter=',')
+        ty, ycom_zhang = data[:, 0], data[:, 1]
+
+        plt.scatter(ty, ycom_zhang, label='y_com zhang')
         plt.plot(t, system_y, label='system com y')
         plt.legend()
         plt.show()
