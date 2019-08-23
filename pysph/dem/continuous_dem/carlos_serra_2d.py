@@ -98,16 +98,16 @@ class SetupContactsBC(Equation):
                 d_bc_rest_len[p] = RIJ
 
 
-class PotyondyIPForceStage1(Equation):
+class PotyondyIPForceEuler(Equation):
     def __init__(self, dest, sources, kn):
         self.kn = kn
         self.kt = kn / 2.
-        super(PotyondyIPForceStage1, self).__init__(dest, sources)
+        super(PotyondyIPForceEuler, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_bc_fn,
                    d_bc_ft_x, d_bc_ft_y, d_bc_fn0, d_bc_ft0_x, d_bc_ft0_y,
-                   d_bc_limit, d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_torz, d_u, d_v,
-                   d_rad_s, d_wz, dt):
+                   d_bc_limit, d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_torz,
+                   d_u, d_v, d_rad_s, d_wz, dt):
         p, q1, tot_ctcs, i, sidx = declare('int', 5)
         xij = declare('matrix(2)')
         vij = declare('matrix(3)')
@@ -169,6 +169,18 @@ class PotyondyIPForceStage1(Equation):
             # equation (5)
             uc = u_sidx_c - u_didx_c
             vc = v_sidx_c - v_didx_c
+            # find the relative velocity in tangential direction
+            # and normal direction
+            vc_dot_nij = uc * nx + vc * ny
+            # relative normal velocity
+            vn_x = vc_dot_nij * nx
+            vn_y = vc_dot_nij * ny
+
+            # relative tangential velocity
+            vt_x = uc - vn_x
+            vt_y = vc - vn_y
+            # magnitude of the tangential velocity
+            vt_magn = (vt_x * vt_x + vt_y * vt_y)**0.5
 
             # the displacement increment of the contact point.
             # equation 8
@@ -187,11 +199,178 @@ class PotyondyIPForceStage1(Equation):
             df_t_x = -self.ks * disp_t_x
             df_t_y = -self.ks * disp_t_y
 
-            # TODO TODO TODO
-            # ROTATE THE SPRING and THEN ADD THE INCREMENTS
+            # ------------- Rotate the spring -----------------------
+            # rotate the spring
+            ft_magn = (d_bc_ft_x[i]**2. + d_bc_ft_y[i]**2.)
+            ft_dot_nij = (d_bc_ft_x[i] * nx + d_bc_ft_y[i] * ny)
 
+            # tangential force projected onto the current normal of the
+            # contact place
+            ft_px = d_bc_ft_x[i] - ft_dot_nij * nx
+            ft_py = d_bc_ft_y[i] - ft_dot_nij * ny
+
+            ftp_magn = (ft_px**2. + ft_py**2.)**0.5
+            if ftp_magn > 0:
+                one_by_ftp_magn = 1. / ftp_magn
+
+                tx = ft_px * one_by_ftp_magn
+                ty = ft_py * one_by_ftp_magn
+            else:
+                if vt_magn > 0.:
+                    tx = -vt_x / vt_magn
+                    ty = -vt_y / vt_magn
+                else:
+                    tx = 0.
+                    ty = 0.
+
+            d_bc_ft_x[i] = ft_magn * tx
+            d_bc_ft_y[i] = ft_magn * ty
+
+            # ------------- Rotate the spring -----------------------
             # add the force to the particles before the increment
-            # Before adding rotate it
+            d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
+            d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
+
+            # compute the moment due to the tangential force
+            d_torz[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
+
+            # Add the increments to the bond forces, for
+            # next time step
+            d_bc_fn[i] += df_n
+            d_bc_ft_x[i] += df_t_x
+            d_bc_ft_y[i] += df_t_y
+
+
+class PotyondyIPForceStage1(Equation):
+    def __init__(self, dest, sources, kn):
+        self.kn = kn
+        self.kt = kn / 2.
+        super(PotyondyIPForceStage1, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_bc_fn,
+                   d_bc_ft_x, d_bc_ft_y, d_bc_fn0, d_bc_ft0_x, d_bc_ft0_y,
+                   d_bc_limit, d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_torz,
+                   d_u, d_v, d_rad_s, d_wz, dt):
+        p, q1, tot_ctcs, i, sidx = declare('int', 5)
+        xij = declare('matrix(2)')
+        vij = declare('matrix(3)')
+        # total number of contacts of particle i in destination
+        tot_ctcs = d_bc_total_contacts[d_idx]
+
+        # d_idx has a range of tracking indices with sources
+        # starting index is p
+        p = d_idx * d_bc_limit[0]
+        # ending index is q -1
+        q1 = p + tot_ctcs
+
+        # we want to find the force acting on particle d_idx due to
+        # contact with particle sidx
+        for i in range(p, q1):
+            sidx = d_bc_idx[i]
+
+            xij[0] = d_x[sidx] - d_x[d_idx]
+            xij[1] = d_y[sidx] - d_y[d_idx]
+            vij[0] = d_u[d_idx] - d_u[sidx]
+            vij[1] = d_v[d_idx] - d_v[sidx]
+
+            # distance between particle d_idx and sidx
+            # equation (1)
+            d = sqrt(xij[0] * xij[0] + xij[1] * xij[1])
+
+            # find the overlap
+            # equation (2)
+            # this can be positive or negative
+            overlap = (d_rad_s[d_idx] + d_rad_s[sidx]) - d
+
+            # normal vector from d_idx to sidx
+            # equation (3)
+            dinv = 1. / d
+            nx = xij[0] * dinv
+            ny = xij[1] * dinv
+
+            # find the contact point from d_idx
+            # equation (4)
+            xc = d_x[d_idx] + (d_rad_s[d_idx] - overlap / 2.) * nx
+            yc = d_y[d_idx] + (d_rad_s[d_idx] - overlap / 2.) * ny
+
+            # velocity of particle d_idx at contact point
+            # equation (6)
+            u_didx_c = d_u[d_idx] - d_wz[d_idx] * (xc - d_x[d_idx])
+            v_didx_c = d_v[d_idx] + d_wz[d_idx] * (yc - d_y[d_idx])
+
+            # velocity of particle sidx at contact point
+            # equation (6)
+            u_sidx_c = d_u[sidx] - d_wz[d_idx] * (xc - d_x[sidx])
+            v_sidx_c = d_v[sidx] + d_wz[d_idx] * (yc - d_y[sidx])
+
+            # find the velocity of the contact point, which involves both
+            # the particles velocities at the contact point
+            # V_c = V_B_c - V_A_c
+            # this equation is a little different from what I am used
+            # to. Need to see what happens when I flip it, i.e.,
+            # V_c = V_A_c - V_B_c
+            # equation (5)
+            uc = u_sidx_c - u_didx_c
+            vc = v_sidx_c - v_didx_c
+            # find the relative velocity in tangential direction
+            # and normal direction
+            vc_dot_nij = uc * nx + vc * ny
+            # relative normal velocity
+            vn_x = vc_dot_nij * nx
+            vn_y = vc_dot_nij * ny
+
+            # relative tangential velocity
+            vt_x = uc - vn_x
+            vt_y = vc - vn_y
+            # magnitude of the tangential velocity
+            vt_magn = (vt_x * vt_x + vt_y * vt_y)**0.5
+
+            # the displacement increment of the contact point.
+            # equation 8
+            dx_c = uc * dt / 2.
+            dy_c = vc * dt / 2.
+
+            # this can be decomposed into a normal and tangential part
+            # equation (9)
+            disp_n = dx_c * nx + dy_c * ny
+            # equation (10)
+            disp_t_x = dx_c - disp_n * nx
+            disp_t_y = dy_c - disp_n * ny
+
+            # the force increment from the displacements can be computed as
+            df_n = -self.kn * disp_n
+            df_t_x = -self.ks * disp_t_x
+            df_t_y = -self.ks * disp_t_y
+
+            # ------------- Rotate the spring -----------------------
+            # rotate the spring
+            ft_magn = (d_bc_ft_x[i]**2. + d_bc_ft_y[i]**2.)
+            ft_dot_nij = (d_bc_ft_x[i] * nx + d_bc_ft_y[i] * ny)
+
+            # tangential force projected onto the current normal of the
+            # contact place
+            ft_px = d_bc_ft_x[i] - ft_dot_nij * nx
+            ft_py = d_bc_ft_y[i] - ft_dot_nij * ny
+
+            ftp_magn = (ft_px**2. + ft_py**2.)**0.5
+            if ftp_magn > 0:
+                one_by_ftp_magn = 1. / ftp_magn
+
+                tx = ft_px * one_by_ftp_magn
+                ty = ft_py * one_by_ftp_magn
+            else:
+                if vt_magn > 0.:
+                    tx = -vt_x / vt_magn
+                    ty = -vt_y / vt_magn
+                else:
+                    tx = 0.
+                    ty = 0.
+
+            d_bc_ft_x[i] = ft_magn * tx
+            d_bc_ft_y[i] = ft_magn * ty
+
+            # ------------- Rotate the spring -----------------------
+            # add the force to the particles before the increment
             d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
             d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
 
@@ -213,8 +392,8 @@ class PotyondyIPForceStage2(Equation):
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_bc_fn,
                    d_bc_ft_x, d_bc_ft_y, d_bc_fn0, d_bc_ft0_x, d_bc_ft0_y,
-                   d_bc_limit, d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_u, d_v,
-                   d_rad_s, d_wz, dt):
+                   d_bc_limit, d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_torz,
+                   d_u, d_v, d_rad_s, d_wz, dt):
         p, q1, tot_ctcs, i, sidx = declare('int', 5)
         xij = declare('matrix(2)')
         vij = declare('matrix(3)')
@@ -276,6 +455,18 @@ class PotyondyIPForceStage2(Equation):
             # equation (5)
             uc = u_sidx_c - u_didx_c
             vc = v_sidx_c - v_didx_c
+            # find the relative velocity in tangential direction
+            # and normal direction
+            vc_dot_nij = uc * nx + vc * ny
+            # relative normal velocity
+            vn_x = vc_dot_nij * nx
+            vn_y = vc_dot_nij * ny
+
+            # relative tangential velocity
+            vt_x = uc - vn_x
+            vt_y = vc - vn_y
+            # magnitude of the tangential velocity
+            vt_magn = (vt_x * vt_x + vt_y * vt_y)**0.5
 
             # the displacement increment of the contact point.
             # equation 8
@@ -294,13 +485,40 @@ class PotyondyIPForceStage2(Equation):
             df_t_x = -self.ks * disp_t_x
             df_t_y = -self.ks * disp_t_y
 
-            # TODO TODO TODO
-            # ROTATE THE SPRING and THEN ADD THE INCREMENTS
+            # ------------- Rotate the spring -----------------------
+            # rotate the spring
+            ft_magn = (d_bc_ft_x[i]**2. + d_bc_ft_y[i]**2.)
+            ft_dot_nij = (d_bc_ft_x[i] * nx + d_bc_ft_y[i] * ny)
 
+            # tangential force projected onto the current normal of the
+            # contact place
+            ft_px = d_bc_ft_x[i] - ft_dot_nij * nx
+            ft_py = d_bc_ft_y[i] - ft_dot_nij * ny
+
+            ftp_magn = (ft_px**2. + ft_py**2.)**0.5
+            if ftp_magn > 0:
+                one_by_ftp_magn = 1. / ftp_magn
+
+                tx = ft_px * one_by_ftp_magn
+                ty = ft_py * one_by_ftp_magn
+            else:
+                if vt_magn > 0.:
+                    tx = -vt_x / vt_magn
+                    ty = -vt_y / vt_magn
+                else:
+                    tx = 0.
+                    ty = 0.
+
+            d_bc_ft_x[i] = ft_magn * tx
+            d_bc_ft_y[i] = ft_magn * ty
+
+            # ------------- Rotate the spring -----------------------
             # add the force to the particles before the increment
-            # Before adding rotate it
             d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
             d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
+
+            # compute the moment due to the tangential force
+            d_torz[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
 
             # Add the increments to the bond forces, for
             # next time step
@@ -309,7 +527,19 @@ class PotyondyIPForceStage2(Equation):
             d_bc_ft_y[i] += df_t_y
 
 
-class RK2StepPotyondy(IntegratorStep):
+class EulerStepCarlos(IntegratorStep):
+    def stage1(self, d_idx, d_x, d_y, d_u, d_v, d_fx, d_fy, d_x0, d_y0, d_u0,
+               d_v0, d_wz0, d_torz, d_wz, d_m_inverse, d_I_inverse, dt):
+        d_x[d_idx] = d_x[d_idx] + dt * d_u[d_idx]
+        d_y[d_idx] = d_y[d_idx] + dt * d_v[d_idx]
+
+        d_u[d_idx] = d_u[d_idx] + dt * d_fx[d_idx] * d_m_inverse[d_idx]
+        d_v[d_idx] = d_v[d_idx] + dt * d_fy[d_idx] * d_m_inverse[d_idx]
+
+        d_wz[d_idx] = d_wz[d_idx] + dt * d_torz[d_idx] * d_I_inverse[d_idx]
+
+
+class RK2StepCarlos(IntegratorStep):
     def initialize(self, d_idx, d_x, d_y, d_x0, d_y0, d_u, d_v, d_u0, d_v0,
                    d_wz, d_wz0, d_bc_total_contacts, d_bc_limit, d_bc_fn,
                    d_bc_ft_x, d_bc_ft_y, d_bc_fn0, d_bc_ft0_x, d_bc_ft0_y):
