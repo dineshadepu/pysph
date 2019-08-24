@@ -226,7 +226,7 @@ class PotyondyIPForceEuler(Equation):
             d_bc_ft_x[i] = ft_magn * tx
             d_bc_ft_y[i] = ft_magn * ty
 
-            # ------------- Rotate the spring -----------------------
+            # ------------- Rotate the spring ends -----------------------
             # add the force to the particles before the increment
             d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
             d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
@@ -369,7 +369,7 @@ class PotyondyIPForceStage1(Equation):
             d_bc_ft_x[i] = ft_magn * tx
             d_bc_ft_y[i] = ft_magn * ty
 
-            # ------------- Rotate the spring -----------------------
+            # ------------- Rotate the spring ends -----------------------
             # add the force to the particles before the increment
             d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
             d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
@@ -512,13 +512,13 @@ class PotyondyIPForceStage2(Equation):
             d_bc_ft_x[i] = ft_magn * tx
             d_bc_ft_y[i] = ft_magn * ty
 
-            # ------------- Rotate the spring -----------------------
+            # ------------- Rotate the spring ends -----------------------
             # add the force to the particles before the increment
             d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
             d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
 
             # compute the moment due to the tangential force
-            d_torz[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
+            d_torz[d_idx] += fuck
 
             # Add the increments to the bond forces, for
             # next time step
@@ -528,8 +528,8 @@ class PotyondyIPForceStage2(Equation):
 
 
 class EulerStepCarlos(IntegratorStep):
-    def stage1(self, d_idx, d_x, d_y, d_u, d_v, d_fx, d_fy, d_x0, d_y0, d_u0,
-               d_v0, d_wz0, d_torz, d_wz, d_m_inverse, d_I_inverse, dt):
+    def stage1(self, d_idx, d_x, d_y, d_u, d_v, d_fx, d_fy,
+               d_torz, d_wz, d_m_inverse, d_I_inverse, dt):
         d_x[d_idx] = d_x[d_idx] + dt * d_u[d_idx]
         d_y[d_idx] = d_y[d_idx] + dt * d_v[d_idx]
 
