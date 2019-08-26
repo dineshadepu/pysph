@@ -57,3 +57,25 @@ def quaternion_multiplication(p, q, res):
     res[1] = (p[0] * q[1] + q[0] * p[1] + p[2] * q[3] - p[3] * q[2])
     res[2] = (p[0] * q[2] + q[0] * p[2] + p[3] * q[1] - p[1] * q[3])
     res[3] = (p[0] * q[3] + q[0] * p[3] + p[1] * q[2] - p[2] * q[1])
+
+
+def quaternion_norm(q):
+    return (q[0]**2. + q[1]**2. + q[2]**2. + q[3]**2.)**0.5
+
+
+def quaternion_inverse(p, p_inv):
+    """
+    Section 5.5 of Kuviper.
+    inverse is complex conjugate.
+    """
+    p_inv[0] = p[0]
+    p_inv[1] = - p[1]
+    p_inv[2] = - p[2]
+    p_inv[3] = - p[3]
+
+
+def rotate_vector_to_current_frame_with_quaternion(q, q_inv, vec, res):
+    """
+    """
+    # not implemented
+    p = 3.
