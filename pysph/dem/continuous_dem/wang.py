@@ -112,11 +112,11 @@ class SetupContactsBC(Equation):
                 d_bc_z_t0[p] = s_z[s_idx] - d_z[d_idx]
 
 
-class PotyondyIPForce(Equation):
+class WangIPForce(Equation):
     def __init__(self, dest, sources, kn):
         self.kn = kn
         self.kt = kn / 2.
-        super(PotyondyIPForce, self).__init__(dest, sources)
+        super(WangIPForce, self).__init__(dest, sources)
 
     def _get_helpers_(self):
         return [
