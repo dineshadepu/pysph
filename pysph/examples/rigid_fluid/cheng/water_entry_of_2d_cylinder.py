@@ -188,16 +188,16 @@ class RigidFluidCoupling(Application):
                 SourceNumberDensity(dest='tank', sources=['fluid']),
                 SolidWallPressureBC(dest='tank', sources=['fluid'], gy=self.gy,
                                     c0=self.c0, rho0=self.rho0),
-                # SetFreeSlipWallVelocity(dest='tank', sources=['fluid']),
-                SetNoSlipWallVelocity(dest='tank', sources=['fluid']),
+                SetFreeSlipWallVelocity(dest='tank', sources=['fluid']),
+                # SetNoSlipWallVelocity(dest='tank', sources=['fluid']),
 
                 # --------- Set the pressure and velocity of dummy particles
                 # of rigid body ------------#
                 SourceNumberDensity(dest='cylinder', sources=['fluid']),
                 SolidWallPressureBC(dest='cylinder', sources=['fluid'],
                                     gy=self.gy, c0=self.c0, rho0=self.rho0),
-                # SetFreeSlipWallVelocity(dest='cylinder', sources=['fluid']),
-                SetNoSlipWallVelocity(dest='cylinder', sources=['fluid']),
+                SetFreeSlipWallVelocity(dest='cylinder', sources=['fluid']),
+                # SetNoSlipWallVelocity(dest='cylinder', sources=['fluid']),
             ]),
             Group(equations=[
                 # apply gravity to rigid body
@@ -238,16 +238,16 @@ class RigidFluidCoupling(Application):
                 SourceNumberDensity(dest='tank', sources=['fluid']),
                 SolidWallPressureBC(dest='tank', sources=['fluid'], gy=self.gy,
                                     c0=self.c0, rho0=self.rho0),
-                # SetFreeSlipWallVelocity(dest='tank', sources=['fluid']),
-                SetNoSlipWallVelocity(dest='tank', sources=['fluid']),
+                SetFreeSlipWallVelocity(dest='tank', sources=['fluid']),
+                # SetNoSlipWallVelocity(dest='tank', sources=['fluid']),
 
                 # --------- Set the pressure and velocity of dummy particles
                 # of rigid body ------------#
                 SourceNumberDensity(dest='cylinder', sources=['fluid']),
                 SolidWallPressureBC(dest='cylinder', sources=['fluid'],
                                     gy=self.gy, c0=self.c0, rho0=self.rho0),
-                # SetFreeSlipWallVelocity(dest='cylinder', sources=['fluid']),
-                SetNoSlipWallVelocity(dest='cylinder', sources=['fluid']),
+                SetFreeSlipWallVelocity(dest='cylinder', sources=['fluid']),
+                # SetNoSlipWallVelocity(dest='cylinder', sources=['fluid']),
             ]),
             Group(equations=[
                 # apply gravity to rigid body

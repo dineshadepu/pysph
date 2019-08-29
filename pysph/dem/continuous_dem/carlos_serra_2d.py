@@ -19,13 +19,13 @@ from pysph.sph.integrator import EulerIntegrator
 from pysph.base.kernels import CubicSpline
 
 
-def get_particle_array_bonded_dem_potyondy_2d(constants=None, **props):
+def get_particle_array_bonded_dem_carlos_serra_2d(constants=None, **props):
     """Return a particle array for a dem particles
     """
     dim = props.pop('dim', None)
 
     dem_props = [
-        'wz', 'fx', 'fy', 'torz', 'rad_s', 'm_inverse', 'I_inverse', 'u0',
+        'wz', 'fx', 'fy', 'fz', 'torx', 'tory', 'torz', 'rad_s', 'm_inverse', 'I_inverse', 'u0',
         'v0', 'x0', 'y0', 'wz0'
     ]
 
@@ -53,6 +53,9 @@ def get_particle_array_bonded_dem_potyondy_2d(constants=None, **props):
     pa.add_property('bc_ft_y', stride=bc_limit)
     pa.add_property('bc_ft0_x', stride=bc_limit)
     pa.add_property('bc_ft0_y', stride=bc_limit)
+    # Moment due to incremental rotation
+    pa.add_property('bc_mnt_z', stride=bc_limit)
+    pa.add_property('bc_mnt0_z', stride=bc_limit)
 
     pa.set_output_arrays([
         'x', 'y', 'u', 'v', 'wz', 'm', 'pid', 'tag', 'gid', 'fx', 'fy', 'torz',
@@ -98,11 +101,11 @@ class SetupContactsBC(Equation):
                 d_bc_rest_len[p] = RIJ
 
 
-class PotyondyIPForceEuler(Equation):
+class CarlosSeraIPForceEuler(Equation):
     def __init__(self, dest, sources, kn):
         self.kn = kn
         self.kt = kn / 2.
-        super(PotyondyIPForceEuler, self).__init__(dest, sources)
+        super(CarlosSeraIPForceEuler, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_bc_fn,
                    d_bc_ft_x, d_bc_ft_y, d_bc_fn0, d_bc_ft0_x, d_bc_ft0_y,
@@ -232,7 +235,9 @@ class PotyondyIPForceEuler(Equation):
             d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
 
             # compute the moment due to the tangential force
-            d_torz[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
+            # (x_c - x_a) \cross ft
+            d_torz[d_idx] += ((xc - d_x[d_idx]) * d_bc_ft_y[i] +
+                              ((yc - d_y[d_idx]) * d_bc_ft_x[i]))
 
             # Add the increments to the bond forces, for
             # next time step
@@ -241,11 +246,11 @@ class PotyondyIPForceEuler(Equation):
             d_bc_ft_y[i] += df_t_y
 
 
-class PotyondyIPForceStage1(Equation):
+class CarlosSeraIPForceStage1(Equation):
     def __init__(self, dest, sources, kn):
         self.kn = kn
-        self.kt = kn / 2.
-        super(PotyondyIPForceStage1, self).__init__(dest, sources)
+        self.ks = kn / 2.
+        super(CarlosSeraIPForceStage1, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_bc_fn,
                    d_bc_ft_x, d_bc_ft_y, d_bc_fn0, d_bc_ft0_x, d_bc_ft0_y,
@@ -327,8 +332,9 @@ class PotyondyIPForceStage1(Equation):
 
             # the displacement increment of the contact point.
             # equation 8
-            dx_c = uc * dt / 2.
-            dy_c = vc * dt / 2.
+            dtb2 = dt / 2.
+            dx_c = uc * dtb2
+            dy_c = vc * dtb2
 
             # this can be decomposed into a normal and tangential part
             # equation (9)
@@ -338,7 +344,7 @@ class PotyondyIPForceStage1(Equation):
             disp_t_y = dy_c - disp_n * ny
 
             # the force increment from the displacements can be computed as
-            df_n = -self.kn * disp_n
+            df_n = self.kn * disp_n
             df_t_x = -self.ks * disp_t_x
             df_t_y = -self.ks * disp_t_y
 
@@ -375,7 +381,9 @@ class PotyondyIPForceStage1(Equation):
             d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
 
             # compute the moment due to the tangential force
-            d_torz[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
+            # (x_c - x_a) \cross ft
+            d_torz[d_idx] += ((xc - d_x[d_idx]) * d_bc_ft_y[i] +
+                              ((yc - d_y[d_idx]) * d_bc_ft_x[i]))
 
             # Add the increments to the bond forces, for
             # next time step
@@ -384,11 +392,11 @@ class PotyondyIPForceStage1(Equation):
             d_bc_ft_y[i] += df_t_y
 
 
-class PotyondyIPForceStage2(Equation):
+class CarlosSeraIPForceStage2(Equation):
     def __init__(self, dest, sources, kn):
         self.kn = kn
-        self.kt = kn / 2.
-        super(PotyondyIPForceStage2, self).__init__(dest, sources)
+        self.ks = kn / 2.
+        super(CarlosSeraIPForceStage2, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_bc_fn,
                    d_bc_ft_x, d_bc_ft_y, d_bc_fn0, d_bc_ft0_x, d_bc_ft0_y,
@@ -470,8 +478,8 @@ class PotyondyIPForceStage2(Equation):
 
             # the displacement increment of the contact point.
             # equation 8
-            dx_c = uc * dt / 2.
-            dy_c = vc * dt / 2.
+            dx_c = uc * dt
+            dy_c = vc * dt
 
             # this can be decomposed into a normal and tangential part
             # equation (9)
@@ -481,7 +489,7 @@ class PotyondyIPForceStage2(Equation):
             disp_t_y = dy_c - disp_n * ny
 
             # the force increment from the displacements can be computed as
-            df_n = -self.kn * disp_n
+            df_n = self.kn * disp_n
             df_t_x = -self.ks * disp_t_x
             df_t_y = -self.ks * disp_t_y
 
@@ -513,21 +521,51 @@ class PotyondyIPForceStage2(Equation):
             d_bc_ft_y[i] = ft_magn * ty
 
             # ------------- Rotate the spring ends -----------------------
+
             # add the force to the particles before the increment
             d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn[i] * nx
             d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn[i] * ny
 
             # compute the moment due to the tangential force
-            d_torz[d_idx] += fuck
+            # (x_c - x_a) \cross ft
+            d_torz[d_idx] += ((xc - d_x[d_idx]) * d_bc_ft_y[i] +
+                              ((yc - d_y[d_idx]) * d_bc_ft_x[i]))
 
             # Add the increments to the bond forces, for
             # next time step
+            # before adding rotate the previous force (at time t=t0)
+            # to the current time step.
+            ft0_magn = (d_bc_ft0_x[i]**2. + d_bc_ft0_y[i]**2.)
+            ft0_dot_nij = (d_bc_ft0_x[i] * nx + d_bc_ft0_y[i] * ny)
+
+            # tangential force projected onto the current normal of the
+            # contact place
+            ft0_px = d_bc_ft0_x[i] - ft0_dot_nij * nx
+            ft0_py = d_bc_ft0_y[i] - ft0_dot_nij * ny
+
+            ft0p_magn = (ft0_px**2. + ft0_py**2.)**0.5
+            if ft0p_magn > 0:
+                one_by_ft0p_magn = 1. / ft0p_magn
+
+                tx = ft0_px * one_by_ft0p_magn
+                ty = ft0_py * one_by_ft0p_magn
+            else:
+                if vt_magn > 0.:
+                    tx = -vt_x / vt_magn
+                    ty = -vt_y / vt_magn
+                else:
+                    tx = 0.
+                    ty = 0.
+
+            d_bc_ft0_x[i] = ft0_magn * tx
+            d_bc_ft0_y[i] = ft0_magn * ty
+
             d_bc_fn[i] += df_n
-            d_bc_ft_x[i] += df_t_x
-            d_bc_ft_y[i] += df_t_y
+            d_bc_ft_x[i] = d_bc_ft0_x[i] + df_t_x
+            d_bc_ft_y[i] = d_bc_ft0_y[i] + df_t_y
 
 
-class EulerStepCarlos(IntegratorStep):
+class EulerStepCarlosSera(IntegratorStep):
     def stage1(self, d_idx, d_x, d_y, d_u, d_v, d_fx, d_fy,
                d_torz, d_wz, d_m_inverse, d_I_inverse, dt):
         d_x[d_idx] = d_x[d_idx] + dt * d_u[d_idx]
@@ -539,7 +577,7 @@ class EulerStepCarlos(IntegratorStep):
         d_wz[d_idx] = d_wz[d_idx] + dt * d_torz[d_idx] * d_I_inverse[d_idx]
 
 
-class RK2StepCarlos(IntegratorStep):
+class RK2StepCarlosSera(IntegratorStep):
     def initialize(self, d_idx, d_x, d_y, d_x0, d_y0, d_u, d_v, d_u0, d_v0,
                    d_wz, d_wz0, d_bc_total_contacts, d_bc_limit, d_bc_fn,
                    d_bc_ft_x, d_bc_ft_y, d_bc_fn0, d_bc_ft0_x, d_bc_ft0_y):
