@@ -1132,15 +1132,21 @@ class RK2StepRigidBodyQuaternionsDEMCundall2d(IntegratorStep):
         # compute the acceleration of the rigid body particles
         # ang_acc_x = d_ang_acc \cross (x_d_idx - x_com)
         # same as
-        # ang_acc_x = d_ang_acc \cross dx
+        # ang_acc_x = d_ang_acc \cross dx + ang_Vel \cross (du)
 
         ang_acc_didx_x = d_ang_acc[i3 + 1] * dz - d_ang_acc[i3 + 2] * dy
         ang_acc_didx_y = d_ang_acc[i3 + 2] * dx - d_ang_acc[i3 + 0] * dz
         ang_acc_didx_z = d_ang_acc[i3 + 0] * dy - d_ang_acc[i3 + 1] * dx
 
-        d_au[d_idx] = d_lin_acc[i3 + 0] + ang_acc_didx_x
-        d_av[d_idx] = d_lin_acc[i3 + 1] + ang_acc_didx_y
-        d_aw[d_idx] = d_lin_acc[i3 + 2] + ang_acc_didx_z
+        # acceleration due to angular velocity, the second term on
+        # rhs
+        acc_ang_vel_x = d_omega[i3 + 1] * dw - d_omega[i3 + 2] * dv
+        acc_ang_vel_y = d_omega[i3 + 2] * du - d_omega[i3 + 0] * dw
+        acc_ang_vel_z = d_omega[i3 + 0] * dv - d_omega[i3 + 1] * du
+
+        d_au[d_idx] = d_lin_acc[i3 + 0] + ang_acc_didx_x + acc_ang_vel_x
+        d_av[d_idx] = d_lin_acc[i3 + 1] + ang_acc_didx_y + acc_ang_vel_y
+        d_aw[d_idx] = d_lin_acc[i3 + 2] + ang_acc_didx_z + acc_ang_vel_z
 
     def py_stage2(self, dst, t, dt):
         for i in range(dst.nb[0]):
@@ -1236,15 +1242,21 @@ class RK2StepRigidBodyQuaternionsDEMCundall2d(IntegratorStep):
         # compute the acceleration of the rigid body particles
         # ang_acc_x = d_ang_acc \cross (x_d_idx - x_com)
         # same as
-        # ang_acc_x = d_ang_acc \cross dx
+        # ang_acc_x = d_ang_acc \cross dx + ang_Vel \cross (du)
 
         ang_acc_didx_x = d_ang_acc[i3 + 1] * dz - d_ang_acc[i3 + 2] * dy
         ang_acc_didx_y = d_ang_acc[i3 + 2] * dx - d_ang_acc[i3 + 0] * dz
         ang_acc_didx_z = d_ang_acc[i3 + 0] * dy - d_ang_acc[i3 + 1] * dx
 
-        d_au[d_idx] = d_lin_acc[i3 + 0] + ang_acc_didx_x
-        d_av[d_idx] = d_lin_acc[i3 + 1] + ang_acc_didx_y
-        d_aw[d_idx] = d_lin_acc[i3 + 2] + ang_acc_didx_z
+        # acceleration due to angular velocity, the second term on
+        # rhs
+        acc_ang_vel_x = d_omega[i3 + 1] * dw - d_omega[i3 + 2] * dv
+        acc_ang_vel_y = d_omega[i3 + 2] * du - d_omega[i3 + 0] * dw
+        acc_ang_vel_z = d_omega[i3 + 0] * dv - d_omega[i3 + 1] * du
+
+        d_au[d_idx] = d_lin_acc[i3 + 0] + ang_acc_didx_x + acc_ang_vel_x
+        d_av[d_idx] = d_lin_acc[i3 + 1] + ang_acc_didx_y + acc_ang_vel_y
+        d_aw[d_idx] = d_lin_acc[i3 + 2] + ang_acc_didx_z + acc_ang_vel_z
 
 
 class RigidBodyQuaternionScheme(Scheme):
