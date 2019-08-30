@@ -12,7 +12,8 @@ from pysph.sph.cheng import (
     ContinuityEquationFluid, ContinuityEquationSolid, MomentumEquationFluid,
     MomentumEquationSolid, StateEquation, get_particle_array_fluid_cheng,
     RigidFluidForce, SourceNumberDensity, SolidWallPressureBC,
-    SetFreeSlipWallVelocity, SetNoSlipWallVelocity, RK2ChengFluidStep)
+    SetFreeSlipWallVelocity, SetNoSlipWallVelocity, SetNoSlipWallVelocityAdami,
+    RK2ChengFluidStep)
 from pysph.base.kernels import QuinticSpline
 from pysph.sph.integrator_step import TransportVelocityStep
 from pysph.sph.integrator import EPECIntegrator
@@ -70,14 +71,15 @@ class RigidFluidCoupling(Application):
         self.tank_length = 0.3
         self.fluid_height = 0.3
         self.spacing = 0.01
-        self.layers = 2
+        self.layers = 4
 
         self.cylinder_radius = 0.05
         self.cylinder_diameter = 2. * self.cylinder_radius
         self.cylinder_spacing = 0.005
-        self.cylinder_rho = 2.7 * 1e3
+        self.cylinder_rho = 1. * 1e3
 
-        self.c0 = 2 * np.sqrt(2 * 9.81 * self.fluid_height)
+        self.Umax = np.sqrt(2 * 9.81 * self.fluid_height)
+        self.c0 = 10. * self.Umax
         self.dx = self.spacing
         self.hdx = 1.2
         self.rho0 = 1000
@@ -91,8 +93,14 @@ class RigidFluidCoupling(Application):
         self.gy = -9.81
         self.dim = 2
 
-        self.tf = 1
-        self.dt = 1e-4
+        h0 = self.hdx * self.dx
+        self.tf = 1.5
+
+        dt_cfl = 0.25 * h0/(self.c0 + self.Umax)
+        dt_viscous = 0.125 * h0**2/self.nu
+
+        self.dt = 0.25*min(dt_cfl, dt_viscous)
+        print("time step is :", self.dt)
 
     def create_particles(self):
         xt, yt, xf, yf = get_2d_hydrostatic_tank(
@@ -188,16 +196,18 @@ class RigidFluidCoupling(Application):
                 SourceNumberDensity(dest='tank', sources=['fluid']),
                 SolidWallPressureBC(dest='tank', sources=['fluid'], gy=self.gy,
                                     c0=self.c0, rho0=self.rho0),
-                SetFreeSlipWallVelocity(dest='tank', sources=['fluid']),
+                # SetFreeSlipWallVelocity(dest='tank', sources=['fluid']),
                 # SetNoSlipWallVelocity(dest='tank', sources=['fluid']),
+                SetNoSlipWallVelocityAdami(dest='tank', sources=['fluid']),
 
                 # --------- Set the pressure and velocity of dummy particles
                 # of rigid body ------------#
                 SourceNumberDensity(dest='cylinder', sources=['fluid']),
                 SolidWallPressureBC(dest='cylinder', sources=['fluid'],
                                     gy=self.gy, c0=self.c0, rho0=self.rho0),
-                SetFreeSlipWallVelocity(dest='cylinder', sources=['fluid']),
+                # SetFreeSlipWallVelocity(dest='cylinder', sources=['fluid']),
                 # SetNoSlipWallVelocity(dest='cylinder', sources=['fluid']),
+                SetNoSlipWallVelocityAdami(dest='cylinder', sources=['fluid']),
             ]),
             Group(equations=[
                 # apply gravity to rigid body
@@ -206,6 +216,9 @@ class RigidFluidCoupling(Application):
                               rho0=self.rho0),
                 ContinuityEquationFluid(dest='fluid', sources=['fluid'],
                                         c0=self.c0, alpha=0.2),
+                # ContinuityEquationFluid(dest='fluid', sources=[
+                #     'tank', 'cylinder'
+                # ], c0=self.c0, alpha=0.2),
                 ContinuityEquationSolid(dest='fluid', sources=[
                     'tank', 'cylinder'
                 ], c0=self.c0, alpha=0.2),
@@ -238,16 +251,18 @@ class RigidFluidCoupling(Application):
                 SourceNumberDensity(dest='tank', sources=['fluid']),
                 SolidWallPressureBC(dest='tank', sources=['fluid'], gy=self.gy,
                                     c0=self.c0, rho0=self.rho0),
-                SetFreeSlipWallVelocity(dest='tank', sources=['fluid']),
+                # SetFreeSlipWallVelocity(dest='tank', sources=['fluid']),
                 # SetNoSlipWallVelocity(dest='tank', sources=['fluid']),
+                SetNoSlipWallVelocityAdami(dest='tank', sources=['fluid']),
 
                 # --------- Set the pressure and velocity of dummy particles
                 # of rigid body ------------#
                 SourceNumberDensity(dest='cylinder', sources=['fluid']),
                 SolidWallPressureBC(dest='cylinder', sources=['fluid'],
                                     gy=self.gy, c0=self.c0, rho0=self.rho0),
-                SetFreeSlipWallVelocity(dest='cylinder', sources=['fluid']),
+                # SetFreeSlipWallVelocity(dest='cylinder', sources=['fluid']),
                 # SetNoSlipWallVelocity(dest='cylinder', sources=['fluid']),
+                SetNoSlipWallVelocityAdami(dest='cylinder', sources=['fluid']),
             ]),
             Group(equations=[
                 # apply gravity to rigid body
@@ -256,6 +271,9 @@ class RigidFluidCoupling(Application):
                               rho0=self.rho0),
                 ContinuityEquationFluid(dest='fluid', sources=['fluid'],
                                         c0=self.c0, alpha=0.2),
+                # ContinuityEquationFluid(dest='fluid', sources=[
+                #     'tank', 'cylinder'
+                # ], c0=self.c0, alpha=0.2),
                 ContinuityEquationSolid(dest='fluid', sources=[
                     'tank', 'cylinder'
                 ], c0=self.c0, alpha=0.2),
@@ -267,6 +285,7 @@ class RigidFluidCoupling(Application):
                     rho0=self.rho0, dim=self.dim, alpha=0.2, nu=self.nu),
                 RigidFluidForce(dest='cylinder', sources=['fluid']),
                 SumUpExternalForces(dest='cylinder', sources=None)
+
             ])
         ]
 

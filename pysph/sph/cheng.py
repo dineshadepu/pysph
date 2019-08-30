@@ -241,7 +241,7 @@ class SolidWallPressureBC(Equation):
         if d_wij[d_idx] > 1e-14:
             d_p[d_idx] /= d_wij[d_idx]
 
-        d_rho[d_idx] = d_p[d_idx] * self.c0_1_2 + self.rho0
+        # d_rho[d_idx] = d_p[d_idx] * self.c0_1_2 + self.rho0
 
 
 class SetNoSlipWallVelocity(Equation):
@@ -296,6 +296,39 @@ class SetNoSlipWallVelocity(Equation):
             d_ug[d_idx] = d_u[d_idx]
             d_vg[d_idx] = d_v[d_idx]
             d_wg[d_idx] = d_w[d_idx]
+
+
+class SetNoSlipWallVelocityAdami(Equation):
+    def initialize(self, d_idx, d_uf, d_vf, d_wf):
+        d_uf[d_idx] = 0.0
+        d_vf[d_idx] = 0.0
+        d_wf[d_idx] = 0.0
+
+    def loop(self, d_idx, s_idx, d_uf, d_vf, d_wf, s_u, s_v, s_w, WIJ):
+        # sum in Eq. (22)
+        # this will be normalized in post loop
+        d_uf[d_idx] += s_u[s_idx] * WIJ
+        d_vf[d_idx] += s_v[s_idx] * WIJ
+        d_wf[d_idx] += s_w[s_idx] * WIJ
+
+    def post_loop(self, d_uf, d_vf, d_wf, d_wij, d_idx, d_ug, d_vg, d_wg, d_u,
+                  d_v, d_w):
+
+        # calculation is done only for the relevant boundary particles.
+        # d_wij (and d_uf) is 0 for particles sufficiently away from the
+        # solid-fluid interface
+
+        # Note that d_wij is already computed for the pressure BC.
+        if d_wij[d_idx] > 1e-12:
+            d_uf[d_idx] /= d_wij[d_idx]
+            d_vf[d_idx] /= d_wij[d_idx]
+            d_wf[d_idx] /= d_wij[d_idx]
+
+        # Dummy velocities at the ghost points using Eq. (23),
+        # d_u, d_v, d_w are the prescribed wall velocities.
+        d_ug[d_idx] = 2*d_u[d_idx] - d_uf[d_idx]
+        d_vg[d_idx] = 2*d_v[d_idx] - d_vf[d_idx]
+        d_wg[d_idx] = 2*d_w[d_idx] - d_wf[d_idx]
 
 
 class SetFreeSlipWallVelocity(Equation):

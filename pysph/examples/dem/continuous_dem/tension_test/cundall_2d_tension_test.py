@@ -9,14 +9,10 @@ from pysph.sph.equation import Equation
 from pysph.solver.application import Application
 from pysph.sph.rigid_body import BodyForce
 from pysph.dem.common import (EPECIntegratorMultiStage)
-from pysph.dem.continuous_dem.carlos_serra_2d import (
-    get_particle_array_bonded_dem_carlos_serra_2d, setup_bc_contacts,
-    CarlosSeraIPForceStage1, CarlosSeraIPForceStage2, RK2StepCarlosSera)
+from pysph.dem.continuous_dem.cundall_2d import (
+    get_particle_array_bonded_dem_cundall_2d, setup_bc_contacts,
+    Cundall2dIPForceStage1, Cundall2dIPForceStage2, RK2StepCundall2d)
 
-from pysph.sph.scheme import SchemeChooser
-from pysph.base.utils import get_particle_array_rigid_body
-from pysph.base.utils import get_particle_array
-from pysph.tools.geometry import get_2d_tank, get_2d_block
 from pysph.sph.equation import Group, MultiStageEquations
 
 
@@ -39,22 +35,22 @@ class ResetForce(Equation):
             d_fz[d_idx] = 0.0
 
 
-class ApplyShearForce(Equation):
-    def __init__(self, dest, sources, fy, idx):
-        self.fy = fy
+class ApplyTensionForce(Equation):
+    def __init__(self, dest, sources, fx, idx):
+        self.fx = fx
         self.idx = idx
-        super(ApplyShearForce, self).__init__(dest, sources)
+        super(ApplyTensionForce, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_fx, d_fy, d_fz):
         if d_idx == self.idx:
-            d_fy[d_idx] = self.fy
+            d_fx[d_idx] = self.fx
 
 
-class ShearTest(Application):
+class TensionTest(Application):
     def initialize(self):
         self.dt = 1e-4
         self.pfreq = 100
-        self.wall_time = 6
+        self.wall_time = 3
         self.debug_time = 0.0
         self.tf = self.wall_time + self.debug_time
         self.dim = 2
@@ -78,7 +74,7 @@ class ShearTest(Application):
         I = 2. / 5. * m * self.radius**2.
         m_inverse = 1. / m
         I_inverse = 1. / I
-        beam = get_particle_array_bonded_dem_carlos_serra_2d(
+        beam = get_particle_array_bonded_dem_cundall_2d(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
             rad_s=self.radius, dem_id=1, h=1.2 * self.radius, name="beam")
         setup_bc_contacts(2, beam, 0.2)
@@ -92,8 +88,8 @@ class ShearTest(Application):
                 # BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
                 #           gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
-                ApplyShearForce(dest='beam', sources=None, fy=50., idx=1),
-                CarlosSeraIPForceStage1(dest='beam', sources=None, kn=self.kn),
+                ApplyTensionForce(dest='beam', sources=None, fx=50., idx=1),
+                Cundall2dIPForceStage1(dest='beam', sources=None, kn=self.kn),
                 ResetForce(dest='beam', sources=None, idx=0),
             ])
         ]
@@ -102,8 +98,8 @@ class ShearTest(Application):
                 # BodyForce(dest='sand', sources=None, gx=0.0, gy=-9.81,
                 #           gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
-                ApplyShearForce(dest='beam', sources=None, fy=50., idx=1),
-                CarlosSeraIPForceStage2(dest='beam', sources=None, kn=self.kn),
+                ApplyTensionForce(dest='beam', sources=None, fx=50., idx=1),
+                Cundall2dIPForceStage2(dest='beam', sources=None, kn=self.kn),
                 ResetForce(dest='beam', sources=None, idx=0),
             ])
         ]
@@ -113,7 +109,7 @@ class ShearTest(Application):
     def create_solver(self):
         kernel = CubicSpline(dim=self.dim)
 
-        integrator = EPECIntegratorMultiStage(beam=RK2StepCarlosSera())
+        integrator = EPECIntegratorMultiStage(beam=RK2StepCundall2d())
 
         dt = self.dt
         tf = self.tf
@@ -144,10 +140,10 @@ class ShearTest(Application):
         # simulated data
         t, y, v = [], [], []
         for sd, arrays in iter_output(files):
-            beam = arrays['beam']
+            sand = arrays['sand']
             t.append(sd['t'])
-            y.append(beam.y[0])
-            v.append(beam.v[0])
+            y.append(sand.y[0])
+            v.append(sand.v[0])
 
         data = np.loadtxt('ffpw_y.csv', delimiter=',')
         ta = data[:, 0]
@@ -166,5 +162,5 @@ class ShearTest(Application):
 
 
 if __name__ == '__main__':
-    app = ShearTest()
+    app = TensionTest()
     app.run()

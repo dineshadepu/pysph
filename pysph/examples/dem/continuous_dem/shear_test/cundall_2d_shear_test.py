@@ -9,14 +9,10 @@ from pysph.sph.equation import Equation
 from pysph.solver.application import Application
 from pysph.sph.rigid_body import BodyForce
 from pysph.dem.common import (EPECIntegratorMultiStage)
-from pysph.dem.continuous_dem.carlos_serra_2d import (
-    get_particle_array_bonded_dem_carlos_serra_2d, setup_bc_contacts,
-    CarlosSeraIPForceStage1, CarlosSeraIPForceStage2, RK2StepCarlosSera)
+from pysph.dem.continuous_dem.cundall_2d import (
+    get_particle_array_bonded_dem_cundall_2d, setup_bc_contacts,
+    Cundall2dIPForceStage1, Cundall2dIPForceStage2, RK2StepCundall2d)
 
-from pysph.sph.scheme import SchemeChooser
-from pysph.base.utils import get_particle_array_rigid_body
-from pysph.base.utils import get_particle_array
-from pysph.tools.geometry import get_2d_tank, get_2d_block
 from pysph.sph.equation import Group, MultiStageEquations
 
 
@@ -32,11 +28,13 @@ class ResetForce(Equation):
         self.idx = idx
         super(ResetForce, self).__init__(dest, sources)
 
-    def initialize(self, d_idx, d_fx, d_fy, d_fz):
+    def post_loop(self, d_idx, d_fx, d_fy, d_fz, d_wz, d_torz):
         if d_idx == self.idx:
             d_fx[d_idx] = 0.0
             d_fy[d_idx] = 0.0
             d_fz[d_idx] = 0.0
+            d_wz[d_idx] = 0.0
+            d_torz[d_idx] = 0.0
 
 
 class ApplyShearForce(Equation):
@@ -78,7 +76,7 @@ class ShearTest(Application):
         I = 2. / 5. * m * self.radius**2.
         m_inverse = 1. / m
         I_inverse = 1. / I
-        beam = get_particle_array_bonded_dem_carlos_serra_2d(
+        beam = get_particle_array_bonded_dem_cundall_2d(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
             rad_s=self.radius, dem_id=1, h=1.2 * self.radius, name="beam")
         setup_bc_contacts(2, beam, 0.2)
@@ -93,7 +91,7 @@ class ShearTest(Application):
                 #           gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
                 ApplyShearForce(dest='beam', sources=None, fy=50., idx=1),
-                CarlosSeraIPForceStage1(dest='beam', sources=None, kn=self.kn),
+                Cundall2dIPForceStage1(dest='beam', sources=None, kn=self.kn),
                 ResetForce(dest='beam', sources=None, idx=0),
             ])
         ]
@@ -103,7 +101,7 @@ class ShearTest(Application):
                 #           gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
                 ApplyShearForce(dest='beam', sources=None, fy=50., idx=1),
-                CarlosSeraIPForceStage2(dest='beam', sources=None, kn=self.kn),
+                Cundall2dIPForceStage2(dest='beam', sources=None, kn=self.kn),
                 ResetForce(dest='beam', sources=None, idx=0),
             ])
         ]
@@ -113,7 +111,7 @@ class ShearTest(Application):
     def create_solver(self):
         kernel = CubicSpline(dim=self.dim)
 
-        integrator = EPECIntegratorMultiStage(beam=RK2StepCarlosSera())
+        integrator = EPECIntegratorMultiStage(beam=RK2StepCundall2d())
 
         dt = self.dt
         tf = self.tf
@@ -126,6 +124,8 @@ class ShearTest(Application):
         self._mayavi_config('''
         b = particle_arrays['beam']
         b.vectors = 'fx, fy, fz'
+        b.mask_on_ratio = 1
+        b.scale_factor = 0.3
         b.show_vectors = True
         b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
         b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
