@@ -39,7 +39,7 @@ def magnitude(a):
     return (a[0] * a[0] + a[1] * a[1] + a[2] * a[2])**0.5
 
 
-def quaternion_multiplication(p, q, res):
+def quaternion_multiplication(p=[0., 0.], q=[0., 0.], res=[0., 0.]):
     """Parameters
     ----------
     p   : [float]
@@ -63,11 +63,11 @@ def quaternion_multiplication(p, q, res):
     res[3] = (p[0] * q[3] + q[0] * p[3] + p[1] * q[2] - p[2] * q[1])
 
 
-def quaternion_norm(q):
+def quaternion_norm(q=[0., 0.]):
     return (q[0]**2. + q[1]**2. + q[2]**2. + q[3]**2.)**0.5
 
 
-def quaternion_inverse(p, p_inv):
+def quaternion_inverse(p=[0., 0.], p_inv=[0., 0.]):
     """
     Section 5.5 of Kuviper.
     inverse is complex conjugate.
@@ -78,7 +78,7 @@ def quaternion_inverse(p, p_inv):
     p_inv[3] = -p[3]
 
 
-def quaternion_to_matrix(q, matrix):
+def quaternion_to_matrix(q=[0., 0.], matrix=[0., 0.]):
     matrix[0] = 1. - 2. * (q[2]**2. + q[3]**2.)
     matrix[1] = 2. * (q[1] * q[2] - q[0] * q[3])
     matrix[2] = 2. * (q[1] * q[3] + q[0] * q[2])
@@ -92,7 +92,7 @@ def quaternion_to_matrix(q, matrix):
     matrix[8] = 1. - 2. * (q[1]**2. + q[2]**2.)
 
 
-def matrix_to_quaternion(matrix, q):
+def matrix_to_quaternion(matrix=[0., 0.], q=[0., 0.]):
     """
     This is taken from
     A bonded particle model for concrete
@@ -109,7 +109,8 @@ def matrix_to_quaternion(matrix, q):
     q[3] = 0.5 * (matrix[3] - matrix[1]) / tmp
 
 
-def change_from_scipy_quat_to_pysph_quat_repr(q_scipy, q_pysph):
+def change_from_scipy_quat_to_pysph_quat_repr(q_scipy=[0., 0.],
+                                              q_pysph=[0., 0.]):
     q_pysph[0] = q_scipy[3]
     q_pysph[1] = q_scipy[0]
     q_pysph[2] = q_scipy[1]
