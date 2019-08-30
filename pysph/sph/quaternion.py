@@ -5,7 +5,6 @@ import numpy as np
 from numpy import sin, cos
 
 
-
 def q_inverse_vec_q(rf=[1.0, 0.0], q=[1.0, 0.0], qinv=[1.0, 0.0],
                     rc=[0.0, 0.0]):
     """Multiply a square matrix with a vector.
@@ -144,23 +143,34 @@ def rotate_local_vec_to_global_vec_with_quat(q=[0., 0.], q_inv=[0., 0.],
     [2] Effect of the integration scheme on the rotation of nonspherical
     particles with the discrete element method
     """
-    # get the cross product
-    # v = q_0^2 v + q_0 t + vec{q} \cross t
-    # t = 2 (\vec{q} \cross v)
-    t = declare('matrix(3)')
-    qct = declare('matrix(3)')
-    t[0] = 2. * (q[2] * vec[2] - q[3] * vec[1])
-    t[1] = 2. * (q[3] * vec[0] - q[1] * vec[2])
-    t[2] = 2. * (q[1] * vec[1] - q[2] * vec[0])
+    tmp_quat = declare('matrix(4)')
+    tmp_quat = declare('matrix(4)')
+    result_quat = declare('matrix(4)')
+    vec_quat = declare('matrix(4)')
+    vec_quat[0] = 0.
+    vec_quat[1] = vec[0]
+    vec_quat[2] = vec[1]
+    vec_quat[3] = vec[2]
 
-    # \vec{q} \cross t
-    qct[0] = (q[2] * t[2] - q[3] * t[1])
-    qct[1] = (q[3] * t[0] - q[1] * t[2])
-    qct[2] = (q[1] * t[1] - q[2] * t[0])
+    # multiply q with vec quat
+    quaternion_multiplication(q, vec_quat, tmp_quat)
 
-    res[0] = q[0]**2. * vec[0] + q[0] * t[0] + qct[0]
-    res[1] = q[0]**2. * vec[1] + q[0] * t[1] + qct[1]
-    res[2] = q[0]**2. * vec[2] + q[0] * t[2] + qct[2]
+    quaternion_multiplication(tmp_quat, q_inv, result_quat)
+
+    res[0] = result_quat[1]
+    res[1] = result_quat[2]
+    res[2] = result_quat[3]
+
+
+def quaternion_from_axis_angle(axis, angle, result):
+    axis = axis / np.linalg.norm(axis)
+    angle_2 = angle / 2
+    ct = cos(angle_2)
+    st = sin(angle_2)
+    result[0] = ct
+    result[1] = axis[0] * st
+    result[2] = axis[1] * st
+    result[3] = axis[2] * st
 
 
 class TestMatrixQuaternionConversions(unittest.TestCase):
@@ -211,5 +221,40 @@ class TestVectorTransformation(unittest.TestCase):
         rotate_local_vec_to_global_vec_with_quat(q, q_inv, v, result_quat)
         np.testing.assert_almost_equal(result_quat, np.array([ct, st, 0.]))
 
-        print(result_dcm)
-        print(result_quat)
+    def test_vec_rotation_random_axis(self):
+        axis = np.array([3., -4, 1.])
+        axis = axis / np.linalg.norm(axis)
+        theta = np.pi / 3
+        theta_2 = theta / 2
+        ct = cos(theta_2)
+        st = sin(theta_2)
+        quat = np.array([axis[0] * st, axis[1] * st, axis[2] * st, ct])
+
+        r = Rot.from_quat(quat)
+        q_scipy = r.as_quat()
+        q_pysph = np.zeros(4)
+        change_from_scipy_quat_to_pysph_quat_repr(q_scipy, q_pysph)
+
+        # matrix from scipy
+        dcm_scipy = r.as_dcm()
+        dcm_pysph = np.zeros(9)
+        quaternion_to_matrix(q_pysph, dcm_pysph)
+
+        result_dcm_pysph = np.zeros(3)
+        result_dcm_scipy = np.zeros(3)
+        result_quat_pysph = np.zeros(3)
+
+        # take a vector on the x axis of local frame
+        v = np.array([1., 2., -0.1])
+        rotate_local_vec_to_global_vec_with_dcm(dcm_pysph, v, result_dcm_pysph)
+        rotate_local_vec_to_global_vec_with_dcm(dcm_scipy.ravel(), v,
+                                                result_dcm_scipy)
+        np.testing.assert_almost_equal(result_dcm_pysph, result_dcm_scipy)
+
+        # take a vector on the x axis of local frame
+        v = np.array([1., 2., -0.1])
+        q_pysph_inv = np.zeros(4)
+        quaternion_inverse(q_pysph, q_pysph_inv)
+        rotate_local_vec_to_global_vec_with_quat(q_pysph, q_pysph_inv, v,
+                                                 result_quat_pysph)
+        np.testing.assert_almost_equal(result_quat_pysph, result_dcm_pysph)
