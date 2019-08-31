@@ -2,6 +2,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+def get_2d_block(block_spacing=0.1, block_length=2., block_height=3):
+    dx = block_spacing
+    x, y = np.mgrid[0.:block_length + dx / 2.:dx, 0.:block_height + dx / 2.:dx]
+    x = x.ravel()
+    y = y.ravel()
+    return x, y
+
+
 def get_2d_hydrostatic_tank(ht_length=2., ht_height=3, fluid_height=2,
                             spacing=0.1, layers=2):
     """

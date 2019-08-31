@@ -10,7 +10,7 @@ from pysph.solver.application import Application
 from pysph.dem.common import (EPECIntegratorMultiStage)
 from pysph.dem.continuous_dem.potyondy_3d import (
     get_particle_array_bonded_dem_potyondy_3d, setup_bc_contacts,
-    BodyForce,
+    BodyForce, DampingForce,
     Potyondy3dIPForceStage1, Potyondy3dIPForceStage2, RK2StepPotyondy3d)
 
 from pysph.sph.equation import Group, MultiStageEquations
@@ -58,12 +58,12 @@ class ApplyShearForce(Equation):
 
 class TensionTest(Application):
     def initialize(self):
-        self.dt = 1e-4
+        self.dt = 1e-5
         self.pfreq = 100
-        self.tf = 20.
+        self.tf = 1.
         self.dim = 2
         self.en = 0.5
-        self.kn = 5000
+        self.kn = 1e9
         # friction coefficient
         self.mu = 0.5
         self.gy = -9.81
@@ -91,8 +91,9 @@ class TensionTest(Application):
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
             rad_s=self.radius / self.scale_factor, dem_id=1,
             h=1.2 * self.radius, name="beam")
-        setup_bc_contacts(2, beam, 0.2)
-        print(beam.bc_idx)
+        setup_bc_contacts(2, beam, 1)
+        print(beam.bc_total_contacts)
+        # print(beam.bc_idx)
 
         return [beam]
 
@@ -101,20 +102,22 @@ class TensionTest(Application):
             Group(equations=[
                 # BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
-                ApplyShearForce(dest='beam', sources=None, fy=50., idx=49),
+                ApplyShearForce(dest='beam', sources=None, fy=500000., idx=49),
                 Potyondy3dIPForceStage1(dest='beam', sources=None, kn=self.kn,
                                         dim=2),
                 ResetForce(dest='beam', sources=None, x=self.radius),
+                DampingForce(dest='beam', sources=None, alpha=0.7)
             ])
         ]
         eq2 = [
             Group(equations=[
                 # BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
-                ApplyShearForce(dest='beam', sources=None, fy=50., idx=49),
+                ApplyShearForce(dest='beam', sources=None, fy=500000., idx=49),
                 Potyondy3dIPForceStage2(dest='beam', sources=None, kn=self.kn,
                                         dim=2),
                 ResetForce(dest='beam', sources=None, x=self.radius),
+                DampingForce(dest='beam', sources=None, alpha=0.7)
             ])
         ]
 

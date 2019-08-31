@@ -476,6 +476,30 @@ class Potyondy3dIPForceStage2(Equation):
             d_torz[d_idx] += d_bc_mn_z[i] + d_bc_ms_z[i]
 
 
+class DampingForce(Equation):
+    def __init__(self, dest, sources, alpha=0.7):
+        self.alpha = alpha
+        super(DampingForce, self).__init__(dest, sources)
+
+    def post_loop(self, d_idx, d_u, d_v, d_w, d_fx, d_fy, d_fz):
+        # magnitude of velocity
+        vmag = (d_u[d_idx]**2. + d_v[d_idx]**2. + d_w[d_idx]**2.)**0.5
+        fmag = (d_fx[d_idx]**2. + d_fy[d_idx]**2. + d_fz[d_idx]**2.)**0.5
+
+        if vmag > 0.:
+            nx = d_u[d_idx] / vmag
+            ny = d_v[d_idx] / vmag
+            nz = d_w[d_idx] / vmag
+        else:
+            nx = 0.
+            ny = 0.
+            nz = 0.
+
+        d_fx[d_idx] += -self.alpha * fmag * nx
+        d_fy[d_idx] += -self.alpha * fmag * ny
+        d_fz[d_idx] += -self.alpha * fmag * nz
+
+
 class RK2StepPotyondy3d(IntegratorStep):
     def initialize(self, d_idx, d_x, d_y, d_z, d_x0, d_y0, d_z0, d_u, d_v, d_w,
                    d_u0, d_v0, d_w0, d_wx, d_wy, d_wz, d_wx0, d_wy0, d_wz0,
