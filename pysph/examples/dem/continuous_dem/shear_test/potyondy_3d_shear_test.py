@@ -17,10 +17,13 @@ from pysph.sph.equation import Group, MultiStageEquations
 
 
 class MakeForcesZero(Equation):
-    def initialize(self, d_idx, d_fx, d_fy, d_fz):
+    def initialize(self, d_idx, d_fx, d_fy, d_fz, d_torx, d_tory, d_torz):
         d_fx[d_idx] = 0.0
         d_fy[d_idx] = 0.0
         d_fz[d_idx] = 0.0
+        d_torx[d_idx] = 0.0
+        d_tory[d_idx] = 0.0
+        d_torz[d_idx] = 0.0
 
 
 class ResetForce(Equation):
@@ -28,12 +31,17 @@ class ResetForce(Equation):
         self.idx = idx
         super(ResetForce, self).__init__(dest, sources)
 
-    def post_loop(self, d_idx, d_fx, d_fy, d_fz, d_wz, d_torz):
+    def post_loop(self, d_idx, d_x, d_fx, d_fy, d_fz, d_wx, d_wy, d_wz, d_torx,
+                  d_tory, d_torz):
         if d_idx == self.idx:
             d_fx[d_idx] = 0.0
             d_fy[d_idx] = 0.0
             d_fz[d_idx] = 0.0
+            d_wx[d_idx] = 0.0
+            d_wy[d_idx] = 0.0
             d_wz[d_idx] = 0.0
+            d_torx[d_idx] = 0.0
+            d_tory[d_idx] = 0.0
             d_torz[d_idx] = 0.0
 
 

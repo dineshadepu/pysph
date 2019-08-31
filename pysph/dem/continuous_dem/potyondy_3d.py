@@ -39,12 +39,12 @@ def get_particle_array_bonded_dem_potyondy_3d(constants=None, **props):
 
     pa.add_property('bc_total_contacts', type='int')
     pa.add_property('bc_rest_len', stride=bc_limit)
-    pa.add_property('bc_ft_x', stride=bc_limit)
-    pa.add_property('bc_ft_y', stride=bc_limit)
-    pa.add_property('bc_ft_z', stride=bc_limit)
-    pa.add_property('bc_ft0_x', stride=bc_limit)
-    pa.add_property('bc_ft0_y', stride=bc_limit)
-    pa.add_property('bc_ft0_z', stride=bc_limit)
+    pa.add_property('bc_fs_x', stride=bc_limit)
+    pa.add_property('bc_fs_y', stride=bc_limit)
+    pa.add_property('bc_fs_z', stride=bc_limit)
+    pa.add_property('bc_fs0_x', stride=bc_limit)
+    pa.add_property('bc_fs0_y', stride=bc_limit)
+    pa.add_property('bc_fs0_z', stride=bc_limit)
 
     pa.add_property('bc_fn_x', stride=bc_limit)
     pa.add_property('bc_fn_y', stride=bc_limit)
@@ -52,6 +52,20 @@ def get_particle_array_bonded_dem_potyondy_3d(constants=None, **props):
     pa.add_property('bc_fn0_x', stride=bc_limit)
     pa.add_property('bc_fn0_y', stride=bc_limit)
     pa.add_property('bc_fn0_z', stride=bc_limit)
+
+    pa.add_property('bc_ms_x', stride=bc_limit)
+    pa.add_property('bc_ms_y', stride=bc_limit)
+    pa.add_property('bc_ms_z', stride=bc_limit)
+    pa.add_property('bc_ms0_x', stride=bc_limit)
+    pa.add_property('bc_ms0_y', stride=bc_limit)
+    pa.add_property('bc_ms0_z', stride=bc_limit)
+
+    pa.add_property('bc_mn_x', stride=bc_limit)
+    pa.add_property('bc_mn_y', stride=bc_limit)
+    pa.add_property('bc_mn_z', stride=bc_limit)
+    pa.add_property('bc_mn0_x', stride=bc_limit)
+    pa.add_property('bc_mn0_y', stride=bc_limit)
+    pa.add_property('bc_mn0_z', stride=bc_limit)
 
     pa.set_output_arrays([
         'x', 'y', 'z', 'u', 'v', 'w', 'wx', 'wy', 'wz', 'm', 'pid', 'tag',
@@ -97,6 +111,22 @@ class SetupContactsBC(Equation):
                 d_bc_rest_len[p] = RIJ
 
 
+class BodyForce(Equation):
+    def __init__(self, dest, sources, gx=0.0, gy=0.0, gz=0.0):
+        self.gx = gx
+        self.gy = gy
+        self.gz = gz
+        super(BodyForce, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_m, d_fx, d_fy, d_fz, d_torx, d_tory, d_torz):
+        d_fx[d_idx] = d_m[d_idx] * self.gx
+        d_fy[d_idx] = d_m[d_idx] * self.gy
+        d_fz[d_idx] = d_m[d_idx] * self.gz
+        d_torx[d_idx] = 0.
+        d_tory[d_idx] = 0.
+        d_torz[d_idx] = 0.
+
+
 class Potyondy3dIPForceStage1(Equation):
     def __init__(self, dest, sources, kn, dim, lmbda=1):
         self.kn = kn
@@ -106,10 +136,12 @@ class Potyondy3dIPForceStage1(Equation):
         super(Potyondy3dIPForceStage1, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_z, d_bc_limit,
-                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_u, d_v, d_w,
-                   d_wx, d_wy, d_wz, d_rad_s, d_bc_ft_x, d_bc_ft_y, d_bc_ft_z,
-                   d_bc_ft0_x, d_bc_ft0_y, d_bc_ft0_z, d_bc_fn_x, d_bc_fn_y,
-                   d_bc_fn_z, d_bc_fn0_x, d_bc_fn0_y, d_bc_fn0_z, dt):
+                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_torx, d_tory,
+                   d_torz, d_u, d_v, d_w, d_wx, d_wy, d_wz, d_rad_s, d_bc_fs_x,
+                   d_bc_fs_y, d_bc_fs_z, d_bc_fs0_x, d_bc_fs0_y, d_bc_fs0_z,
+                   d_bc_fn_x, d_bc_fn_y, d_bc_fn_z, d_bc_fn0_x, d_bc_fn0_y,
+                   d_bc_fn0_z, d_bc_mn_x, d_bc_mn_y, d_bc_mn_z, d_bc_ms_x,
+                   d_bc_ms_y, d_bc_ms_z, dt):
         p, q1, tot_ctcs, i, sidx = declare('int', 5)
         xij = declare('matrix(3)')
         # total number of contacts of particle i in destination
@@ -187,8 +219,12 @@ class Potyondy3dIPForceStage1(Equation):
             r_eff = self.lmbda * min(d_rad_s[d_idx], d_rad_s[sidx])
             if self.dim == 2:
                 A = 2. * r_eff
+                I = 2. / 3. * r_eff**3.
+                J = 0.
             else:
                 A = pi * r_eff**2.
+                I = 0.25 * pi * r_eff**4.
+                J = 0.5 * pi * r_eff**4.
 
             # THIS IS EXPERIMENTAL
             # relative normal displacement increment vector
@@ -204,25 +240,66 @@ class Potyondy3dIPForceStage1(Equation):
 
             # rotate the shear forces to the current plane
             # shear force in normal direction
-            bc_ft_dot_n = (d_bc_ft_x[i] * nji_x + d_bc_ft_y[i] * nji_y +
-                           d_bc_ft_z[i] * nji_z)
+            bc_fs_dot_n = (d_bc_fs_x[i] * nji_x + d_bc_fs_y[i] * nji_y +
+                           d_bc_fs_z[i] * nji_z)
 
             # the rotated old shear force
-            ft_rot_x = d_bc_ft_x[i] - bc_ft_dot_n * nji_x
-            ft_rot_y = d_bc_ft_y[i] - bc_ft_dot_n * nji_y
-            ft_rot_z = d_bc_ft_z[i] - bc_ft_dot_n * nji_z
+            fs_rot_x = d_bc_fs_x[i] - bc_fs_dot_n * nji_x
+            fs_rot_y = d_bc_fs_y[i] - bc_fs_dot_n * nji_y
+            fs_rot_z = d_bc_fs_z[i] - bc_fs_dot_n * nji_z
 
             # now add the contribution of shear displacement to the
             # shear contact forces after rotation
 
-            d_bc_ft_x[i] = ft_rot_x - self.ks * A * du_sx
-            d_bc_ft_y[i] = ft_rot_y - self.ks * A * du_sy
-            d_bc_ft_z[i] = ft_rot_z - self.ks * A * du_sz
+            d_bc_fs_x[i] = fs_rot_x - self.ks * A * du_sx
+            d_bc_fs_y[i] = fs_rot_y - self.ks * A * du_sy
+            d_bc_fs_z[i] = fs_rot_z - self.ks * A * du_sz
 
             # now add this force to the global force of particle d_idx
-            d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn_x[i]
-            d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn_y[i]
-            d_fz[d_idx] += d_bc_ft_z[i] + d_bc_fn_z[i]
+            d_fx[d_idx] += d_bc_fs_x[i] + d_bc_fn_x[i]
+            d_fy[d_idx] += d_bc_fs_y[i] + d_bc_fn_y[i]
+            d_fz[d_idx] += d_bc_fs_z[i] + d_bc_fn_z[i]
+
+            # add the moment due to the shear force
+            d_torx[d_idx] += ((rc_y - d_y[d_idx]) * d_bc_fs_z[i] -
+                              (rc_z - d_z[d_idx]) * d_bc_fs_y[i])
+            d_tory[d_idx] += ((rc_z - d_z[d_idx]) * d_bc_fs_x[i] -
+                              (rc_x - d_x[d_idx]) * d_bc_fs_z[i])
+            d_torz[d_idx] += ((rc_x - d_x[d_idx]) * d_bc_fs_y[i] -
+                              (rc_y - d_y[d_idx]) * d_bc_fs_x[i])
+
+            # find the incremental moments
+            # relative rotation displacement increment vector
+            dtb2 = dt / 2.
+            dtheta_x = (d_wx[d_idx] - d_wx[sidx]) * dtb2
+            dtheta_y = (d_wy[d_idx] - d_wy[sidx]) * dtb2
+            dtheta_z = (d_wz[d_idx] - d_wz[sidx]) * dtb2
+
+            # resolve the rotation increment into normal direction
+            dtheta_dot_n = (
+                dtheta_x * nji_x + dtheta_y * nji_y + dtheta_z * nji_z)
+            dtheta_nx = dtheta_dot_n * nji_x
+            dtheta_ny = dtheta_dot_n * nji_y
+            dtheta_nz = dtheta_dot_n * nji_z
+
+            # resolve the rotation increment into tangential direction
+            dtheta_sx = dtheta_x - dtheta_nx
+            dtheta_sy = dtheta_y - dtheta_ny
+            dtheta_sz = dtheta_z - dtheta_nz
+
+            # using the net increment of the rotation, increment the contact
+            # moment
+            d_bc_mn_x[i] = d_bc_mn_x[i] - self.kn * J * dtheta_nx
+            d_bc_mn_y[i] = d_bc_mn_y[i] - self.kn * J * dtheta_ny
+            d_bc_mn_z[i] = d_bc_mn_z[i] - self.kn * J * dtheta_nz
+
+            d_bc_ms_x[i] = d_bc_ms_x[i] - self.ks * I * dtheta_sx
+            d_bc_ms_y[i] = d_bc_ms_y[i] - self.ks * I * dtheta_sy
+            d_bc_ms_z[i] = d_bc_ms_z[i] - self.ks * I * dtheta_sz
+
+            d_torx[d_idx] += d_bc_mn_x[i] + d_bc_ms_x[i]
+            d_tory[d_idx] += d_bc_mn_y[i] + d_bc_ms_y[i]
+            d_torz[d_idx] += d_bc_mn_z[i] + d_bc_ms_z[i]
 
 
 class Potyondy3dIPForceStage2(Equation):
@@ -234,10 +311,13 @@ class Potyondy3dIPForceStage2(Equation):
         super(Potyondy3dIPForceStage2, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_z, d_bc_limit,
-                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_u, d_v, d_w,
-                   d_wx, d_wy, d_wz, d_rad_s, d_bc_ft_x, d_bc_ft_y, d_bc_ft_z,
-                   d_bc_ft0_x, d_bc_ft0_y, d_bc_ft0_z, d_bc_fn_x, d_bc_fn_y,
-                   d_bc_fn_z, d_bc_fn0_x, d_bc_fn0_y, d_bc_fn0_z, dt):
+                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_torx, d_tory,
+                   d_torz, d_u, d_v, d_w, d_wx, d_wy, d_wz, d_rad_s, d_bc_fs_x,
+                   d_bc_fs_y, d_bc_fs_z, d_bc_fs0_x, d_bc_fs0_y, d_bc_fs0_z,
+                   d_bc_fn_x, d_bc_fn_y, d_bc_fn_z, d_bc_fn0_x, d_bc_fn0_y,
+                   d_bc_fn0_z, d_bc_mn_x, d_bc_mn_y, d_bc_mn_z, d_bc_ms_x,
+                   d_bc_ms_y, d_bc_ms_z, d_bc_mn0_x, d_bc_mn0_y, d_bc_mn0_z,
+                   d_bc_ms0_x, d_bc_ms0_y, d_bc_ms0_z, dt):
         p, q1, tot_ctcs, i, sidx = declare('int', 5)
         xij = declare('matrix(3)')
         # total number of contacts of particle i in destination
@@ -309,8 +389,12 @@ class Potyondy3dIPForceStage2(Equation):
             r_eff = self.lmbda * min(d_rad_s[d_idx], d_rad_s[sidx])
             if self.dim == 2:
                 A = 2. * r_eff
+                I = 2. / 3. * r_eff**3.
+                J = 0.
             else:
                 A = pi * r_eff**2.
+                I = 0.25 * pi * r_eff**4.
+                J = 0.5 * pi * r_eff**4.
 
             # THIS IS EXPERIMENTAL
             # relative normal displacement increment vector
@@ -326,13 +410,13 @@ class Potyondy3dIPForceStage2(Equation):
 
             # rotate the shear forces to the current plane
             # shear force in normal direction
-            bc_ft_dot_n = (d_bc_ft0_x[i] * nji_x + d_bc_ft0_y[i] * nji_y +
-                           d_bc_ft0_z[i] * nji_z)
+            bc_fs_dot_n = (d_bc_fs0_x[i] * nji_x + d_bc_fs0_y[i] * nji_y +
+                           d_bc_fs0_z[i] * nji_z)
 
             # the rotated old shear force
-            ft_rot_x = d_bc_ft0_x[i] - bc_ft_dot_n * nji_x
-            ft_rot_y = d_bc_ft0_y[i] - bc_ft_dot_n * nji_y
-            ft_rot_z = d_bc_ft0_z[i] - bc_ft_dot_n * nji_z
+            fs_rot_x = d_bc_fs0_x[i] - bc_fs_dot_n * nji_x
+            fs_rot_y = d_bc_fs0_y[i] - bc_fs_dot_n * nji_y
+            fs_rot_z = d_bc_fs0_z[i] - bc_fs_dot_n * nji_z
 
             # relative shear displacement increment vector
             du_sx = vr_tx * dt
@@ -342,22 +426,65 @@ class Potyondy3dIPForceStage2(Equation):
             # now add the contribution of shear displacement to the
             # shear contact forces after rotation
 
-            d_bc_ft_x[i] = ft_rot_x - self.ks * A * du_sx
-            d_bc_ft_y[i] = ft_rot_y - self.ks * A * du_sy
-            d_bc_ft_z[i] = ft_rot_z - self.ks * A * du_sz
+            d_bc_fs_x[i] = fs_rot_x - self.ks * A * du_sx
+            d_bc_fs_y[i] = fs_rot_y - self.ks * A * du_sy
+            d_bc_fs_z[i] = fs_rot_z - self.ks * A * du_sz
 
             # now add this force to the global force of particle d_idx
-            d_fx[d_idx] += d_bc_ft_x[i] + d_bc_fn_x[i]
-            d_fy[d_idx] += d_bc_ft_y[i] + d_bc_fn_y[i]
-            d_fz[d_idx] += d_bc_ft_z[i] + d_bc_fn_z[i]
+            d_fx[d_idx] += d_bc_fs_x[i] + d_bc_fn_x[i]
+            d_fy[d_idx] += d_bc_fs_y[i] + d_bc_fn_y[i]
+            d_fz[d_idx] += d_bc_fs_z[i] + d_bc_fn_z[i]
+
+            # add the moment due to the shear force
+            d_torx[d_idx] += ((rc_y - d_y[d_idx]) * d_bc_fs_z[i] -
+                              (rc_z - d_z[d_idx]) * d_bc_fs_y[i])
+            d_tory[d_idx] += ((rc_z - d_z[d_idx]) * d_bc_fs_x[i] -
+                              (rc_x - d_x[d_idx]) * d_bc_fs_z[i])
+            d_torz[d_idx] += ((rc_x - d_x[d_idx]) * d_bc_fs_y[i] -
+                              (rc_y - d_y[d_idx]) * d_bc_fs_x[i])
+
+            # find the incremental moments
+            # relative rotation displacement increment vector
+            dtheta_x = (d_wx[d_idx] - d_wx[sidx]) * dt
+            dtheta_y = (d_wy[d_idx] - d_wy[sidx]) * dt
+            dtheta_z = (d_wz[d_idx] - d_wz[sidx]) * dt
+
+            # resolve the rotation increment into normal direction
+            dtheta_dot_n = (
+                dtheta_x * nji_x + dtheta_y * nji_y + dtheta_z * nji_z)
+            dtheta_nx = dtheta_dot_n * nji_x
+            dtheta_ny = dtheta_dot_n * nji_y
+            dtheta_nz = dtheta_dot_n * nji_z
+
+            # resolve the rotation increment into tangential direction
+            dtheta_sx = dtheta_x - dtheta_nx
+            dtheta_sy = dtheta_y - dtheta_ny
+            dtheta_sz = dtheta_z - dtheta_nz
+
+            # using the net increment of the rotation, increment the contact
+            # moment
+            d_bc_mn_x[i] = d_bc_mn0_x[i] - self.kn * J * dtheta_nx
+            d_bc_mn_y[i] = d_bc_mn0_y[i] - self.kn * J * dtheta_ny
+            d_bc_mn_z[i] = d_bc_mn0_z[i] - self.kn * J * dtheta_nz
+
+            d_bc_ms_x[i] = d_bc_ms0_x[i] - self.ks * I * dtheta_sx
+            d_bc_ms_y[i] = d_bc_ms0_y[i] - self.ks * I * dtheta_sy
+            d_bc_ms_z[i] = d_bc_ms0_z[i] - self.ks * I * dtheta_sz
+
+            d_torx[d_idx] += d_bc_mn_x[i] + d_bc_ms_x[i]
+            d_tory[d_idx] += d_bc_mn_y[i] + d_bc_ms_y[i]
+            d_torz[d_idx] += d_bc_mn_z[i] + d_bc_ms_z[i]
 
 
 class RK2StepPotyondy3d(IntegratorStep):
     def initialize(self, d_idx, d_x, d_y, d_z, d_x0, d_y0, d_z0, d_u, d_v, d_w,
                    d_u0, d_v0, d_w0, d_wx, d_wy, d_wz, d_wx0, d_wy0, d_wz0,
-                   d_bc_total_contacts, d_bc_limit, d_bc_ft_x, d_bc_ft_y,
-                   d_bc_ft_z, d_bc_ft0_x, d_bc_ft0_y, d_bc_ft0_z, d_bc_fn_x,
-                   d_bc_fn_y, d_bc_fn_z, d_bc_fn0_x, d_bc_fn0_y, d_bc_fn0_z):
+                   d_bc_total_contacts, d_bc_limit, d_bc_fs_x, d_bc_fs_y,
+                   d_bc_fs_z, d_bc_fs0_x, d_bc_fs0_y, d_bc_fs0_z, d_bc_fn_x,
+                   d_bc_fn_y, d_bc_fn_z, d_bc_fn0_x, d_bc_fn0_y, d_bc_fn0_z,
+                   d_bc_ms_x, d_bc_ms_y, d_bc_ms_z, d_bc_ms0_x, d_bc_ms0_y,
+                   d_bc_ms0_z, d_bc_mn_x, d_bc_mn_y, d_bc_mn_z, d_bc_mn0_x,
+                   d_bc_mn0_y, d_bc_mn0_z):
 
         d_x0[d_idx] = d_x[d_idx]
         d_y0[d_idx] = d_y[d_idx]
@@ -383,12 +510,19 @@ class RK2StepPotyondy3d(IntegratorStep):
         q = p + tot_ctcs
 
         for i in range(p, q):
-            d_bc_ft0_x[i] = d_bc_ft_x[i]
-            d_bc_ft0_y[i] = d_bc_ft_y[i]
-            d_bc_ft0_z[i] = d_bc_ft_z[i]
+            d_bc_fs0_x[i] = d_bc_fs_x[i]
+            d_bc_fs0_y[i] = d_bc_fs_y[i]
+            d_bc_fs0_z[i] = d_bc_fs_z[i]
             d_bc_fn0_x[i] = d_bc_fn_x[i]
             d_bc_fn0_y[i] = d_bc_fn_y[i]
             d_bc_fn0_z[i] = d_bc_fn_z[i]
+
+            d_bc_ms0_x[i] = d_bc_ms_x[i]
+            d_bc_ms0_y[i] = d_bc_ms_y[i]
+            d_bc_ms0_z[i] = d_bc_ms_z[i]
+            d_bc_mn0_x[i] = d_bc_mn_x[i]
+            d_bc_mn0_y[i] = d_bc_mn_y[i]
+            d_bc_mn0_z[i] = d_bc_mn_z[i]
 
     def stage1(self, d_idx, d_x, d_y, d_z, d_u, d_v, d_w, d_fx, d_fy, d_fz,
                d_x0, d_y0, d_z0, d_u0, d_v0, d_w0, d_wx0, d_wy0, d_wz0, d_torx,

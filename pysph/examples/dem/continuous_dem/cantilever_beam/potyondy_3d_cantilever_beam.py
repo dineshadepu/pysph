@@ -7,20 +7,23 @@ from pysph.solver.solver import Solver
 from pysph.sph.equation import Equation
 
 from pysph.solver.application import Application
-from pysph.sph.rigid_body import BodyForce
 from pysph.dem.common import (EPECIntegratorMultiStage)
 from pysph.dem.continuous_dem.potyondy_3d import (
     get_particle_array_bonded_dem_potyondy_3d, setup_bc_contacts,
+    BodyForce,
     Potyondy3dIPForceStage1, Potyondy3dIPForceStage2, RK2StepPotyondy3d)
 
 from pysph.sph.equation import Group, MultiStageEquations
 
 
 class MakeForcesZero(Equation):
-    def initialize(self, d_idx, d_fx, d_fy, d_fz):
+    def initialize(self, d_idx, d_fx, d_fy, d_fz, d_torx, d_tory, d_torz):
         d_fx[d_idx] = 0.0
         d_fy[d_idx] = 0.0
         d_fz[d_idx] = 0.0
+        d_torx[d_idx] = 0.0
+        d_tory[d_idx] = 0.0
+        d_torz[d_idx] = 0.0
 
 
 class ResetForce(Equation):
@@ -28,12 +31,17 @@ class ResetForce(Equation):
         self.x = x
         super(ResetForce, self).__init__(dest, sources)
 
-    def post_loop(self, d_idx, d_x, d_fx, d_fy, d_fz, d_wz, d_torz):
+    def post_loop(self, d_idx, d_x, d_fx, d_fy, d_fz, d_wx, d_wy, d_wz, d_torx,
+                  d_tory, d_torz):
         if d_x[d_idx] < self.x:
             d_fx[d_idx] = 0.0
             d_fy[d_idx] = 0.0
             d_fz[d_idx] = 0.0
+            d_wx[d_idx] = 0.0
+            d_wy[d_idx] = 0.0
             d_wz[d_idx] = 0.0
+            d_torx[d_idx] = 0.0
+            d_tory[d_idx] = 0.0
             d_torz[d_idx] = 0.0
 
 
@@ -45,7 +53,7 @@ class ApplyShearForce(Equation):
 
     def initialize(self, d_idx, d_fx, d_fy, d_fz):
         if d_idx == self.idx:
-            d_fy[d_idx] = self.fy
+            d_fy[d_idx] += self.fy
 
 
 class TensionTest(Application):
@@ -91,7 +99,7 @@ class TensionTest(Application):
     def create_equations(self):
         eq1 = [
             Group(equations=[
-                BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
+                # BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
                 ApplyShearForce(dest='beam', sources=None, fy=50., idx=49),
                 Potyondy3dIPForceStage1(dest='beam', sources=None, kn=self.kn,
@@ -101,7 +109,7 @@ class TensionTest(Application):
         ]
         eq2 = [
             Group(equations=[
-                BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
+                # BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
                 ApplyShearForce(dest='beam', sources=None, fy=50., idx=49),
                 Potyondy3dIPForceStage2(dest='beam', sources=None, kn=self.kn,
