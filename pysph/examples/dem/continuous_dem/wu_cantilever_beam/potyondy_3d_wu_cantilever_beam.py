@@ -57,6 +57,17 @@ class ApplyShearForce(Equation):
             d_fy[d_idx] += self.fy
 
 
+class ApplyTensionForce(Equation):
+    def __init__(self, dest, sources, fx, idx):
+        self.fx = fx
+        self.idx = idx
+        super(ApplyTensionForce, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_fx, d_fy, d_fz):
+        if d_idx == self.idx:
+            d_fx[d_idx] = self.fx
+
+
 class TensionTest(Application):
     def initialize(self):
         self.dt = 1e-6
@@ -64,7 +75,7 @@ class TensionTest(Application):
         self.tf = 1.
         self.dim = 2
         self.en = 0.5
-        self.kn = 1e9
+        self.kn = 1e6
         self.dx = 0.0005
         self.beam_h = 0.006169
         self.beam_l = 0.201
@@ -85,13 +96,13 @@ class TensionTest(Application):
 
         # get index with maximum x and minimum y
         rho = 2800
-        m = rho * 4. / 3. * np.pi * self.dx**3
+        m = rho * self.dx**2
         I = 2. / 5. * m * self.dx**2.
         m_inverse = 1. / m
         I_inverse = 1. / I
         beam = get_particle_array_bonded_dem_potyondy_3d(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
-            rad_s=self.dx / self.scale_factor, dem_id=1,
+            rad_s=self.dx, dem_id=1,
             h=4. * self.dx, name="beam")
         setup_bc_contacts(2, beam, 0.22)
 
@@ -104,7 +115,8 @@ class TensionTest(Application):
             Group(equations=[
                 # BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
-                ApplyShearForce(dest='beam', sources=None, fy=50., idx=self.idx),
+                ApplyTensionForce(dest='beam', sources=None, fx=50., idx=self.idx),
+                # ApplyShearForce(dest='beam', sources=None, fy=50., idx=self.idx),
                 Potyondy3dIPForceStage1(dest='beam', sources=None, kn=self.kn,
                                         dim=2),
                 ResetForce(dest='beam', sources=None, x=self.dx),
@@ -115,7 +127,8 @@ class TensionTest(Application):
             Group(equations=[
                 # BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
-                ApplyShearForce(dest='beam', sources=None, fy=50., idx=self.idx),
+                ApplyTensionForce(dest='beam', sources=None, fx=50., idx=self.idx),
+                # ApplyShearForce(dest='beam', sources=None, fy=50., idx=self.idx),
                 Potyondy3dIPForceStage2(dest='beam', sources=None, kn=self.kn,
                                         dim=2),
                 ResetForce(dest='beam', sources=None, x=self.dx),
