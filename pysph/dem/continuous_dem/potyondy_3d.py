@@ -38,7 +38,6 @@ def get_particle_array_bonded_dem_potyondy_3d(constants=None, **props):
     pa.bc_idx[:] = -1
 
     pa.add_property('bc_total_contacts', type='int')
-    pa.add_property('bc_rest_len', stride=bc_limit)
     pa.add_property('bc_fs_x', stride=bc_limit)
     pa.add_property('bc_fs_y', stride=bc_limit)
     pa.add_property('bc_fs_z', stride=bc_limit)
@@ -94,21 +93,73 @@ def setup_bc_contacts(dim, pa, beta):
     a_eval.evaluate()
 
 
+def setup_bc_contacts_from_limit(dim, pa, limit):
+    eqs1 = [
+        Group(equations=[
+            SetupContactsBCfromLimit(dest=pa.name, sources=[pa.name],
+                                     limit=limit),
+        ])
+    ]
+    arrays = [pa]
+    a_eval = make_accel_eval(eqs1, arrays, dim)
+    a_eval.evaluate()
+
+
 class SetupContactsBC(Equation):
     def __init__(self, dest, sources, beta):
         self.beta = beta
         super(SetupContactsBC, self).__init__(dest, sources)
 
     def loop(self, d_idx, s_idx, d_bc_total_contacts, d_bc_idx, d_bc_limit,
-             d_rad_s, d_bc_rest_len, s_rad_s, RIJ):
+             d_rad_s, s_rad_s, RIJ):
         p = declare('int')
         p = d_bc_limit[0] * d_idx + d_bc_total_contacts[d_idx]
         fac = RIJ / (d_rad_s[d_idx] + s_rad_s[s_idx])
+
         if RIJ > 1e-12:
+            # if d_idx == 402:
+            #     print("------------------")
+            #     print("------------------")
+            #     print("------------------")
+            #     print("s_idx is")
+            #     print(s_idx)
+            #     print("fac is ")
+            #     print(fac)
+            #     print("1 - self.beta")
+            #     print(1. - self.beta)
+            #     print("1 + self.beta")
+            #     print(1. + self.beta)
             if 1. - self.beta < fac < 1 + self.beta:
                 d_bc_idx[p] = s_idx
                 d_bc_total_contacts[d_idx] += 1
-                d_bc_rest_len[p] = RIJ
+
+
+class SetupContactsBCfromLimit(Equation):
+    def __init__(self, dest, sources, limit):
+        self.limit = limit
+        super(SetupContactsBCfromLimit, self).__init__(dest, sources)
+
+    def loop(self, d_idx, s_idx, d_bc_total_contacts, d_bc_idx, d_bc_limit,
+             d_rad_s, s_rad_s, RIJ):
+        p = declare('int')
+        p = d_bc_limit[0] * d_idx + d_bc_total_contacts[d_idx]
+
+        if RIJ > 1e-12:
+            # if d_idx == 1607:
+            #     print("------------------")
+            #     print("------------------")
+            #     print("------------------")
+            #     print("s_idx is")
+            #     print(s_idx)
+            #     print("RIJ is")
+            #     print(RIJ)
+            #     print("and limit is ")
+            #     print(self.limit)
+            if RIJ < self.limit:
+                # if d_idx == 1607:
+                #     print("yes in contact")
+                d_bc_idx[p] = s_idx
+                d_bc_total_contacts[d_idx] += 1
 
 
 class BodyForce(Equation):
@@ -136,7 +187,7 @@ class Potyondy3dIPForceStage1(Equation):
         super(Potyondy3dIPForceStage1, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_z, d_bc_limit,
-                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_torx, d_tory,
+                   d_bc_idx, d_fx, d_fy, d_fz, d_torx, d_tory,
                    d_torz, d_u, d_v, d_w, d_wx, d_wy, d_wz, d_rad_s, d_bc_fs_x,
                    d_bc_fs_y, d_bc_fs_z, d_bc_fs0_x, d_bc_fs0_y, d_bc_fs0_z,
                    d_bc_fn_x, d_bc_fn_y, d_bc_fn_z, d_bc_fn0_x, d_bc_fn0_y,
@@ -311,7 +362,7 @@ class Potyondy3dIPForceStage2(Equation):
         super(Potyondy3dIPForceStage2, self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_bc_total_contacts, d_x, d_y, d_z, d_bc_limit,
-                   d_bc_idx, d_bc_rest_len, d_fx, d_fy, d_fz, d_torx, d_tory,
+                   d_bc_idx, d_fx, d_fy, d_fz, d_torx, d_tory,
                    d_torz, d_u, d_v, d_w, d_wx, d_wy, d_wz, d_rad_s, d_bc_fs_x,
                    d_bc_fs_y, d_bc_fs_z, d_bc_fs0_x, d_bc_fs0_y, d_bc_fs0_z,
                    d_bc_fn_x, d_bc_fn_y, d_bc_fn_z, d_bc_fn0_x, d_bc_fn0_y,

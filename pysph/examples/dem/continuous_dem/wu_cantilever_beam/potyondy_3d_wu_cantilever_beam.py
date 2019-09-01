@@ -10,6 +10,7 @@ from pysph.solver.application import Application
 from pysph.dem.common import (EPECIntegratorMultiStage)
 from pysph.dem.continuous_dem.potyondy_3d import (
     get_particle_array_bonded_dem_potyondy_3d, setup_bc_contacts,
+    setup_bc_contacts_from_limit,
     BodyForce, DampingForce,
     Potyondy3dIPForceStage1, Potyondy3dIPForceStage2, RK2StepPotyondy3d)
 
@@ -71,16 +72,16 @@ class ApplyTensionForce(Equation):
 
 class TensionTest(Application):
     def initialize(self):
-        self.dt = 1e-6
+        self.dt = 1e-5
         self.pfreq = 100
         self.tf = 1.
         self.dim = 2
         self.en = 0.5
-        self.kn = 1e6
+        self.kn = 1e9
         self.dx = 0.0005
         self.beam_h = 0.006169
         self.beam_l = 0.201
-        self.idx = 5226
+        self.idx = 402
 
         # friction coefficient
         self.mu = 0.5
@@ -103,9 +104,10 @@ class TensionTest(Application):
         I_inverse = 1. / I
         beam = get_particle_array_bonded_dem_potyondy_3d(
             x=xp, y=yp, m=m, I_inverse=I_inverse, m_inverse=m_inverse,
-            rad_s=self.dx, dem_id=1,
-            h=4. * self.dx, name="beam")
-        setup_bc_contacts(2, beam, 0.22)
+            rad_s=self.dx/2., dem_id=1,
+            h=1.2 * self.dx, name="beam")
+        # setup_bc_contacts(2, beam, 0.23)
+        setup_bc_contacts_from_limit(2, beam, self.dx + self.dx/2.)
 
         print(beam.bc_total_contacts)
 
@@ -116,8 +118,8 @@ class TensionTest(Application):
             Group(equations=[
                 # BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
-                ApplyTensionForce(dest='beam', sources=None, fx=50., idx=self.idx),
-                # ApplyShearForce(dest='beam', sources=None, fy=50., idx=self.idx),
+                # ApplyTensionForce(dest='beam', sources=None, fx=50., idx=self.idx),
+                ApplyShearForce(dest='beam', sources=None, fy=50., idx=self.idx),
                 Potyondy3dIPForceStage1(dest='beam', sources=None, kn=self.kn,
                                         dim=2),
                 ResetForce(dest='beam', sources=None, x=self.dx),
@@ -128,8 +130,8 @@ class TensionTest(Application):
             Group(equations=[
                 # BodyForce(dest='beam', sources=None, gx=0.0, gy=-9.81, gz=0.0),
                 MakeForcesZero(dest='beam', sources=None),
-                ApplyTensionForce(dest='beam', sources=None, fx=50., idx=self.idx),
-                # ApplyShearForce(dest='beam', sources=None, fy=50., idx=self.idx),
+                # ApplyTensionForce(dest='beam', sources=None, fx=50., idx=self.idx),
+                ApplyShearForce(dest='beam', sources=None, fy=50., idx=self.idx),
                 Potyondy3dIPForceStage2(dest='beam', sources=None, kn=self.kn,
                                         dim=2),
                 ResetForce(dest='beam', sources=None, x=self.dx),
@@ -151,17 +153,17 @@ class TensionTest(Application):
         solver.set_disable_output(True)
         return solver
 
-    def customize_output(self):
-        self._mayavi_config('''
-        b = particle_arrays['beam']
-        b.vectors = 'fx, fy, fz'
-        b.show_vectors = True
-        b.mask_on_ratio = 1
-        b.scale_factor = 0.3
-        b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
-        b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
-        b.scalar = 'fy'
-        '''.format(s_rad=self.dx/2.))
+    # def customize_output(self):
+    #     self._mayavi_config('''
+    #     b = particle_arrays['beam']
+    #     b.vectors = 'fx, fy, fz'
+    #     b.show_vectors = True
+    #     b.mask_on_ratio = 1
+    #     b.scale_factor = 0.3
+    #     b.plot.glyph.glyph_source.glyph_source = b.plot.glyph.glyph_source.glyph_dict['sphere_source']
+    #     b.plot.glyph.glyph_source.glyph_source.radius = {s_rad}
+    #     b.scalar = 'fy'
+    #     '''.format(s_rad=self.dx/2.))
 
     def post_process(self, info_fname):
         self.read_info(info_fname)
