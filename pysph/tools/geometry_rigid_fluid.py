@@ -244,6 +244,3 @@ def test_hexagonal_block():
     plt.scatter(x, y)
     plt.axes().set_aspect('equal', 'datalim')
     plt.show()
-
-
-test_hexagonal_block()

@@ -75,8 +75,8 @@ class RigidFluidCoupling(Application):
 
         self.cylinder_radius = 0.05
         self.cylinder_diameter = 2. * self.cylinder_radius
-        self.cylinder_spacing = 0.005
-        self.cylinder_rho = 1. * 1e3
+        self.cylinder_spacing = self.spacing / 2.
+        self.cylinder_rho = 2. * 1e3
 
         self.Umax = np.sqrt(2 * 9.81 * self.fluid_height)
         self.c0 = 10. * self.Umax
@@ -99,7 +99,7 @@ class RigidFluidCoupling(Application):
         dt_cfl = 0.25 * h0/(self.c0 + self.Umax)
         dt_viscous = 0.125 * h0**2/self.nu
 
-        self.dt = 0.25*min(dt_cfl, dt_viscous)
+        self.dt = 0.5*min(dt_cfl, dt_viscous)
         print("time step is :", self.dt)
 
     def create_particles(self):
@@ -179,18 +179,18 @@ class RigidFluidCoupling(Application):
     def create_equations(self):
         stage1 = [
             # compute the normals
-            Group(equations=[
-                ComputeNormals(dest='cylinder', sources=['cylinder'])
-            ]),
-            Group(equations=[
-                ComputeNormals(dest='tank', sources=['tank'])
-            ]),
-            Group(equations=[
-                SmoothNormals(dest='cylinder', sources=['cylinder'])
-            ]),
-            Group(equations=[
-                SmoothNormals(dest='tank', sources=['tank'])
-            ]),
+            # Group(equations=[
+            #     ComputeNormals(dest='cylinder', sources=['cylinder'])
+            # ]),
+            # Group(equations=[
+            #     ComputeNormals(dest='tank', sources=['tank'])
+            # ]),
+            # Group(equations=[
+            #     SmoothNormals(dest='cylinder', sources=['cylinder'])
+            # ]),
+            # Group(equations=[
+            #     SmoothNormals(dest='tank', sources=['tank'])
+            # ]),
 
             Group(equations=[
                 SourceNumberDensity(dest='tank', sources=['fluid']),
@@ -235,18 +235,18 @@ class RigidFluidCoupling(Application):
 
         stage2 = [
             # compute the normals
-            Group(equations=[
-                ComputeNormals(dest='cylinder', sources=['cylinder'])
-            ]),
-            Group(equations=[
-                ComputeNormals(dest='tank', sources=['tank'])
-            ]),
-            Group(equations=[
-                SmoothNormals(dest='cylinder', sources=['cylinder'])
-            ]),
-            Group(equations=[
-                SmoothNormals(dest='tank', sources=['tank'])
-            ]),
+            # Group(equations=[
+            #     ComputeNormals(dest='cylinder', sources=['cylinder'])
+            # ]),
+            # Group(equations=[
+            #     ComputeNormals(dest='tank', sources=['tank'])
+            # ]),
+            # Group(equations=[
+            #     SmoothNormals(dest='cylinder', sources=['cylinder'])
+            # ]),
+            # Group(equations=[
+            #     SmoothNormals(dest='tank', sources=['tank'])
+            # ]),
             Group(equations=[
                 SourceNumberDensity(dest='tank', sources=['fluid']),
                 SolidWallPressureBC(dest='tank', sources=['fluid'], gy=self.gy,

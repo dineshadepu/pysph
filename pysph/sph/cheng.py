@@ -241,7 +241,7 @@ class SolidWallPressureBC(Equation):
         if d_wij[d_idx] > 1e-14:
             d_p[d_idx] /= d_wij[d_idx]
 
-        # d_rho[d_idx] = d_p[d_idx] * self.c0_1_2 + self.rho0
+        d_rho[d_idx] = d_p[d_idx] * self.c0_1_2 + self.rho0
 
 
 class SetNoSlipWallVelocity(Equation):
