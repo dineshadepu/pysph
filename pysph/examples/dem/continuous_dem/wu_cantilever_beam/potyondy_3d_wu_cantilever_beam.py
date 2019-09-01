@@ -14,7 +14,8 @@ from pysph.dem.continuous_dem.potyondy_3d import (
     Potyondy3dIPForceStage1, Potyondy3dIPForceStage2, RK2StepPotyondy3d)
 
 from pysph.sph.equation import Group, MultiStageEquations
-from pysph.tools.geometry_rigid_fluid import get_2d_block
+from pysph.tools.geometry_rigid_fluid import (get_2d_block,
+                                              get_2d_block_hexagonal)
 
 
 class MakeForcesZero(Equation):
@@ -92,7 +93,7 @@ class TensionTest(Application):
 
     def create_particles(self):
         # create a particle
-        xp, yp = get_2d_block(self.dx, self.beam_l, self.beam_h)
+        xp, yp = get_2d_block_hexagonal(self.dx, self.beam_l, self.beam_h)
 
         # get index with maximum x and minimum y
         rho = 2800

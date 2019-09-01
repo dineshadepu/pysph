@@ -11,7 +11,9 @@ from pysph.sph.rigid_body import BodyForce
 from pysph.dem.common import (EPECIntegratorMultiStage)
 from pysph.dem.continuous_dem.potyondy_3d import (
     get_particle_array_bonded_dem_potyondy_3d, setup_bc_contacts,
-    Potyondy3dIPForceStage1, Potyondy3dIPForceStage2, RK2StepPotyondy3d)
+    Potyondy3dIPForceStage1, Potyondy3dIPForceStage2,
+    DampingForce,
+    RK2StepPotyondy3d)
 
 from pysph.sph.equation import Group, MultiStageEquations
 
@@ -102,6 +104,7 @@ class TensionTest(Application):
                 Potyondy3dIPForceStage1(dest='beam', sources=None, kn=self.kn,
                                         dim=2),
                 ResetForce(dest='beam', sources=None, idx=0),
+                DampingForce(dest='beam', sources=None, alpha=0.7)
             ])
         ]
         eq2 = [
@@ -113,6 +116,7 @@ class TensionTest(Application):
                 Potyondy3dIPForceStage2(dest='beam', sources=None, kn=self.kn,
                                         dim=2),
                 ResetForce(dest='beam', sources=None, idx=0),
+                DampingForce(dest='beam', sources=None, alpha=0.7)
             ])
         ]
 
