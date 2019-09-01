@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 def get_2d_block(block_spacing=0.1, block_length=2., block_height=3):
@@ -174,6 +173,7 @@ def get_2d_dam_break(ht_length=2., ht_height=3, fluid_height=2,
 
 def test_2d_hydrostatic_tank():
     # test_1
+    import matplotlib.pyplot as plt
     xt, yt, xf, yf = get_2d_hydrostatic_tank()
     plt.scatter(xt, yt)
     plt.scatter(xf, yf)
@@ -204,6 +204,7 @@ def test_2d_hydrostatic_tank():
 
 def test_2d_hydrostatic_tank_with_sponge_layer():
     # test_1
+    import matplotlib.pyplot as plt
     xt, yt, xf, yf = get_2d_hydrostatic_tank_with_sponge_layer()
     plt.scatter(xt, yt)
     plt.scatter(xf, yf)
