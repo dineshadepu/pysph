@@ -99,7 +99,7 @@ class RigidFluidCoupling(Application):
         dt_cfl = 0.25 * h0/(self.c0 + self.Umax)
         dt_viscous = 0.125 * h0**2/self.nu
 
-        self.dt = 0.5 * min(dt_cfl, dt_viscous)
+        self.dt = 0.25 * min(dt_cfl, dt_viscous)
         print("time step is :", self.dt)
 
     def create_particles(self):

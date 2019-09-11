@@ -72,16 +72,16 @@ class ApplyTensionForce(Equation):
 
 class TensionTest(Application):
     def initialize(self):
-        self.dt = 1e-5
+        self.dt = 1e-6
         self.pfreq = 100
         self.tf = 1.
         self.dim = 2
         self.en = 0.5
         self.kn = 1e9
-        self.dx = 0.0005
+        self.dx = 0.0007
         self.beam_h = 0.006169
         self.beam_l = 0.201
-        self.idx = 402
+        self.idx = 287
 
         # friction coefficient
         self.mu = 0.5

@@ -56,7 +56,7 @@ class ParticlesinGlass2d(Application):
         self.sand_spacing = self.dx
         self.sand_rho = 1850.
 
-        self.pfreq = 100
+        self.pfreq = 1000
 
     def create_particles(self):
         # create tank
