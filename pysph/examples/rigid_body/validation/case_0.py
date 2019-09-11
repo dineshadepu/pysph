@@ -34,16 +34,16 @@ class Case0(Application):
     def create_scheme(self):
         # rbss = RigidBodySimpleScheme
         rbss = RigidBodySimpleScheme(bodies=['body'], solids=None, dim=3,
-                                     rho0=self.rho0, kn=self.kn, mu=self.mu,
+                                     kn=self.kn, mu=self.mu,
                                      en=self.en)
         rbrms = RigidBodyRotationMatricesScheme(
-            bodies=['body'], solids=None, dim=3, rho0=self.rho0, kn=self.kn,
+            bodies=['body'], solids=None, dim=3, kn=self.kn,
             mu=self.mu, en=self.en)
         rbqs = RigidBodyQuaternionScheme(
-            bodies=['body'], solids=None, dim=3, rho0=self.rho0, kn=self.kn,
+            bodies=['body'], solids=None, dim=3, kn=self.kn,
             mu=self.mu, en=self.en)
         rbrmos = RigidBodyRotationMatricesOptimizedScheme(
-            bodies=['body'], solids=None, dim=3, rho0=self.rho0, kn=self.kn,
+            bodies=['body'], solids=None, dim=3, kn=self.kn,
             mu=self.mu, en=self.en)
         s = SchemeChooser(default='rbss', rbss=rbss, rbrms=rbrms, rbqs=rbqs,
                           rbrmos=rbrmos)

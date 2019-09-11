@@ -46,7 +46,7 @@ class Case0(Application):
         scheme = self.scheme
         kernel = CubicSpline(dim=self.dim)
         dt = 1e-3
-        tf = 3. * dt
+        tf = 1.
         scheme.configure()
         scheme.configure_solver(kernel=kernel, integrator_cls=EPECIntegrator,
                                 dt=dt, tf=tf)

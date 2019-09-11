@@ -76,7 +76,7 @@ class RigidFluidCoupling(Application):
         self.cylinder_radius = 0.05
         self.cylinder_diameter = 2. * self.cylinder_radius
         self.cylinder_spacing = self.spacing / 2.
-        self.cylinder_rho = 2. * 1e3
+        self.cylinder_rho = 1. * 1e3
 
         self.Umax = np.sqrt(2 * 9.81 * self.fluid_height)
         self.c0 = 10. * self.Umax
@@ -94,12 +94,12 @@ class RigidFluidCoupling(Application):
         self.dim = 2
 
         h0 = self.hdx * self.dx
-        self.tf = 1.5
+        self.tf = 5.
 
         dt_cfl = 0.25 * h0/(self.c0 + self.Umax)
         dt_viscous = 0.125 * h0**2/self.nu
 
-        self.dt = 0.5*min(dt_cfl, dt_viscous)
+        self.dt = 0.5 * min(dt_cfl, dt_viscous)
         print("time step is :", self.dt)
 
     def create_particles(self):
@@ -122,12 +122,12 @@ class RigidFluidCoupling(Application):
         tank = get_particle_array_fluid_cheng(x=xt, y=yt, h=h, m=m, rho=rho,
                                               name="tank")
 
-        tank.add_property('normal_x', stride=3)
-        tank.add_property('normal_y', stride=3)
-        tank.add_property('normal_z', stride=3)
-        tank.add_property('normal_tmp_x', stride=3)
-        tank.add_property('normal_tmp_y', stride=3)
-        tank.add_property('normal_tmp_z', stride=3)
+        tank.add_property('normal_x')
+        tank.add_property('normal_y')
+        tank.add_property('normal_z')
+        tank.add_property('normal_tmp_x')
+        tank.add_property('normal_tmp_y')
+        tank.add_property('normal_tmp_z')
         # add properties to tank for Adami boundary boundary condition
         for prop in ('ug', 'vg', 'wg', 'uf', 'vf', 'wf', 'wij'):
             tank.add_property(name=prop)
@@ -145,12 +145,12 @@ class RigidFluidCoupling(Application):
             x=xc, y=yc, h=h, m=m, rho=self.cylinder_rho, rad_s=rad_s, dem_id=1,
             name="cylinder")
 
-        cylinder.add_property('normal_x', stride=3)
-        cylinder.add_property('normal_y', stride=3)
-        cylinder.add_property('normal_z', stride=3)
-        cylinder.add_property('normal_tmp_x', stride=3)
-        cylinder.add_property('normal_tmp_y', stride=3)
-        cylinder.add_property('normal_tmp_z', stride=3)
+        cylinder.add_property('normal_x')
+        cylinder.add_property('normal_y')
+        cylinder.add_property('normal_z')
+        cylinder.add_property('normal_tmp_x')
+        cylinder.add_property('normal_tmp_y')
+        cylinder.add_property('normal_tmp_z')
 
         cylinder.set_output_arrays([
             'x', 'y', 'z', 'u', 'v', 'w', 'rho', 'h', 'm', 'p', 'pid', 'au',
