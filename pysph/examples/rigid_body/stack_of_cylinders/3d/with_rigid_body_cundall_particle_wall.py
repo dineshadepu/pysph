@@ -329,29 +329,31 @@ class ZhangStackOfCylinders(Application):
         system_y = []
         for sd, array in iter_output(files, 'cylinders'):
             _t = sd['t']
-            if _t > self.wall_time:
-                t.append(_t)
-                # get the system center
-                cm_x = 0
-                cm_y = 0
-                for i in range(array.nb[0]):
-                    cm_x += array.cm[3 * i]
-                    cm_y += array.cm[3 * i + 1]
-                cm_x = cm_x / 33
-                cm_y = cm_y / 33
+            t.append(_t)
+            # get the system center
+            cm_x = 0
+            cm_y = 0
+            for i in range(array.nb[0]):
+                cm_x += array.cm[3 * i]
+                cm_y += array.cm[3 * i + 1]
+            cm_x = cm_x / 33
+            cm_y = cm_y / 33
 
-                system_x.append(cm_x / self.dam_length)
-                system_y.append(cm_y / self.dam_length)
+            system_x.append(cm_x / self.dam_length)
+            system_y.append(cm_y / self.dam_length)
 
         import matplotlib.pyplot as plt
         t = np.asarray(t)
-        t = t - np.min(t)
+        t = t - 0.1
+        print(t)
 
         data = np.loadtxt('../x_com_zhang.csv', delimiter=',')
         tx, xcom_zhang = data[:, 0], data[:, 1]
 
-        plt.scatter(tx, xcom_zhang, label='x_com zhang')
-        plt.plot(t, system_x, label='system com x')
+        plt.plot(tx, xcom_zhang, "s--", label='Simulated PySPH')
+        plt.plot(t, system_x, "s-", label='Experimental')
+        plt.xlabel("time")
+        plt.ylabel("x/L")
         plt.legend()
         plt.show()
         plt.clf()
@@ -359,8 +361,10 @@ class ZhangStackOfCylinders(Application):
         data = np.loadtxt('../y_com_zhang.csv', delimiter=',')
         ty, ycom_zhang = data[:, 0], data[:, 1]
 
-        plt.scatter(ty, ycom_zhang, label='y_com zhang')
-        plt.plot(t, system_y, label='system com y')
+        plt.plot(ty, ycom_zhang, "s--", label='Simulated PySPH')
+        plt.plot(t, system_y, "s-", label='Experimental')
+        plt.xlabel("time")
+        plt.ylabel("y/L")
         plt.legend()
         plt.show()
 
@@ -375,5 +379,5 @@ if __name__ == '__main__':
     app = ZhangStackOfCylinders()
     # app.create_particles()
     # app.geometry()
-    app.run()
+    # app.run()
     app.post_process()

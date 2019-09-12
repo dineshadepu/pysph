@@ -9,6 +9,28 @@ from pysph.base.kernels import CubicSpline
 from pysph.solver.application import Application
 
 
+def get_files_at_given_times_from_log(files, iters, logfile):
+    import re
+    result = []
+    # time_pattern = r"output at time\ (\d+(?:\.\d+)?)"
+    iter_pattern = r", iteration\ (\d+)"
+    file_count, time_count = 0, 0
+    with open(logfile, 'r') as f:
+        for line in f:
+            if time_count >= len(iters):
+                break
+            t = re.findall(iter_pattern, line)
+            if t:
+                if float(t[0]) in iters:
+                    result.append(files[file_count])
+                    time_count += 1
+                elif float(t[0]) > iters[time_count]:
+                    result.append(files[file_count])
+                    time_count += 1
+                file_count += 1
+    return result
+
+
 class OscillatingPlate(Application):
     def initialize(self):
         self.L = 0.2
@@ -19,7 +41,7 @@ class OscillatingPlate(Application):
 
         # edge velocity of the plate (m/s)
         self.Vf = 0.05
-        self.dx_plate = 0.002
+        self.dx_plate = self.H / 30
         self.h = 1.3 * self.dx_plate
         self.plate_rho0 = 1000.
         self.plate_E = 2. * 1e6
@@ -145,11 +167,20 @@ class OscillatingPlate(Application):
         if len(self.output_files) == 0:
             return
 
+        # load data from file
+        data = np.loadtxt('amplitude_gray.csv', delimiter=',')
+        t_d = data[:, 0]
+        ampl_d = data[:, 1]
+
         from pysph.solver.utils import iter_output
 
         files = self.output_files
         t, amplitude = [], []
-        for sd, array in iter_output(files, 'plate'):
+        iters = range(0, 100000, 1000)
+        logfile = self.info_filename.split('.')[0] + '.log'
+        to_plot = get_files_at_given_times_from_log(files, iters, logfile)
+
+        for sd, array in iter_output(to_plot, 'plate'):
             _t = sd['t']
             t.append(_t)
             amplitude.append(array.y[array.amplitude_idx[0]])
@@ -160,7 +191,8 @@ class OscillatingPlate(Application):
 
         from matplotlib import pyplot as plt
         plt.clf()
-        plt.plot(t, amplitude)
+        plt.plot(t, amplitude, label="PySPH")
+        plt.plot(t_d, ampl_d, label="Gray")
         plt.xlabel('t')
         plt.ylabel('Amplitude')
         plt.legend()
