@@ -137,39 +137,27 @@ class TensionTest(Application):
         b.scalar = 'fy'
         '''.format(s_rad=self.radius))
 
-    def post_process(self, info_fname):
-        self.read_info(info_fname)
-        if len(self.output_files) == 0:
-            return
-
+    def post_process(self):
         from pysph.solver.utils import iter_output
         import matplotlib.pyplot as plt
 
         files = self.output_files
+        print(len(files))
         # simulated data
-        t, y, v = [], [], []
+        t, fx = [], []
         for sd, arrays in iter_output(files):
-            sand = arrays['sand']
+            beam = arrays['beam']
             t.append(sd['t'])
-            y.append(sand.y[0])
-            v.append(sand.v[0])
+            fx.append(beam.fx[1])
 
-        data = np.loadtxt('ffpw_y.csv', delimiter=',')
-        ta = data[:, 0]
-        ya = data[:, 1]
-        plt.plot(ta, ya)
-        plt.scatter(t, y)
-        plt.savefig('t_vs_y.png')
-        plt.clf()
-
-        data = np.loadtxt('ffpw_v.csv', delimiter=',')
-        ta = data[:, 0]
-        va = data[:, 1]
-        plt.plot(ta, va)
-        plt.scatter(t, v)
-        plt.savefig('t_vs_v.png')
+        plt.plot(t, fx)
+        plt.xlabel("time")
+        plt.ylabel("Force on particle 1 in x-direction")
+        plt.savefig('tension_test_potyondy_3d.png', dpi=300)
+        plt.show()
 
 
 if __name__ == '__main__':
     app = TensionTest()
     app.run()
+    app.post_process()

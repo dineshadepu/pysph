@@ -19,6 +19,7 @@ from pysph.dem.discontinuous_dem.dem_nonlinear import (
     EPECIntegratorMultiStage, EulerIntegratorMultiStage)
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
+import os
 
 from pysph.sph.rigid_body import (BodyForce)
 
@@ -355,18 +356,18 @@ class ZhangStackOfCylinders(Application):
         plt.xlabel("time")
         plt.ylabel("x/L")
         plt.legend()
-        plt.show()
+        plt.savefig("xcom", dpi=300)
         plt.clf()
 
         data = np.loadtxt('../y_com_zhang.csv', delimiter=',')
         ty, ycom_zhang = data[:, 0], data[:, 1]
 
-        plt.plot(ty, ycom_zhang, "s--", label='Simulated PySPH')
-        plt.plot(t, system_y, "s-", label='Experimental')
+        plt.plot(ty, ycom_zhang, "s--", label='Experimental')
+        plt.plot(t, system_y, "s-", label='Simulated PySPH')
         plt.xlabel("time")
         plt.ylabel("y/L")
         plt.legend()
-        plt.show()
+        plt.savefig("ycom", dpi=300)
 
     def customize_output(self):
         self._mayavi_config('''
@@ -379,5 +380,5 @@ if __name__ == '__main__':
     app = ZhangStackOfCylinders()
     # app.create_particles()
     # app.geometry()
-    # app.run()
+    app.run()
     app.post_process()

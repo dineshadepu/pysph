@@ -19,7 +19,8 @@ from pysph.sph.integrator_step import TransportVelocityStep
 from pysph.sph.integrator import EPECIntegrator
 from pysph.base.kernels import CubicSpline
 from pysph.solver.solver import Solver
-from pysph.tools.geometry_rigid_fluid import (get_2d_hydrostatic_tank)
+from pysph.tools.geometry_rigid_fluid import (get_2d_hydrostatic_tank,
+                                              get_2d_dam_break)
 
 # rigid body imports
 from pysph.dem.discontinuous_dem.dem_nonlinear import (
@@ -39,7 +40,6 @@ from pysph.sph.rigid_body_cundall_3d import (
 
 from pysph.sph.wall_normal import (ComputeNormals, SmoothNormals)
 
-from pysph.examples.solid_mech.oscillating_plate import get_files_at_given_times_from_log
 
 def create_circle(diameter=1, spacing=0.05, center=None):
     dx = spacing
@@ -57,6 +57,7 @@ def create_circle(diameter=1, spacing=0.05, center=None):
         nt = nnew
         r = r + dx
     x = np.array(x)
+
     y = np.array(y)
     x, y = (t.ravel() for t in (x, y))
     if center is None:
@@ -68,10 +69,11 @@ def create_circle(diameter=1, spacing=0.05, center=None):
 class RigidFluidCoupling(Application):
     def initialize(self):
         # dimensions
-        self.tank_height = 0.5
-        self.tank_length = 0.3
-        self.fluid_height = 0.3
-        self.spacing = 0.01
+        self.tank_height = 1.
+        self.tank_length = 5.
+        self.fluid_height = 0.7
+        self.fluid_length = 0.4
+        self.spacing = 0.02
         self.layers = 4
 
         self.cylinder_radius = 0.05
@@ -95,19 +97,19 @@ class RigidFluidCoupling(Application):
         self.dim = 2
 
         h0 = self.hdx * self.dx
-        self.tf = 5.
+        self.tf = 1.5
 
-        dt_cfl = 0.25 * h0/(self.c0 + self.Umax)
-        dt_viscous = 0.125 * h0**2/self.nu
+        dt_cfl = 0.25 * h0 / (self.c0 + self.Umax)
+        dt_viscous = 0.125 * h0**2 / self.nu
 
-        self.dt = 0.25 * min(dt_cfl, dt_viscous)
+        self.dt = 1. * min(dt_cfl, dt_viscous)
         print("time step is :", self.dt)
 
     def create_particles(self):
-        xt, yt, xf, yf = get_2d_hydrostatic_tank(
+        xt, yt, xf, yf = get_2d_dam_break(
             ht_length=self.tank_height, ht_height=self.tank_height,
-            fluid_height=self.fluid_height, spacing=self.spacing,
-            layers=self.layers)
+            fluid_height=self.fluid_height, fluid_length=self.fluid_length,
+            spacing=self.spacing, layers=self.layers)
         # import matplotlib.pyplot as plt
         # plt.scatter(xt, yt)
         # plt.scatter(xf, yf)
@@ -123,19 +125,19 @@ class RigidFluidCoupling(Application):
         tank = get_particle_array_fluid_cheng(x=xt, y=yt, h=h, m=m, rho=rho,
                                               name="tank")
 
-        tank.add_property('normal_x')
-        tank.add_property('normal_y')
-        tank.add_property('normal_z')
-        tank.add_property('normal_tmp_x')
-        tank.add_property('normal_tmp_y')
-        tank.add_property('normal_tmp_z')
+        tank.add_property('normal_x', stride=3)
+        tank.add_property('normal_y', stride=3)
+        tank.add_property('normal_z', stride=3)
+        tank.add_property('normal_tmp_x', stride=3)
+        tank.add_property('normal_tmp_y', stride=3)
+        tank.add_property('normal_tmp_z', stride=3)
         # add properties to tank for Adami boundary boundary condition
         for prop in ('ug', 'vg', 'wg', 'uf', 'vf', 'wf', 'wij'):
             tank.add_property(name=prop)
 
         # create rigid body
         xc, yc = create_circle(self.cylinder_diameter, self.cylinder_spacing)
-        yc = yc + self.fluid_height + self.cylinder_diameter
+        yc = yc + self.cylinder_diameter
         xc = xc + self.tank_length / 2.
         # plt.scatter(xc, yc)
         # plt.show()
@@ -146,17 +148,17 @@ class RigidFluidCoupling(Application):
             x=xc, y=yc, h=h, m=m, rho=self.cylinder_rho, rad_s=rad_s, dem_id=1,
             name="cylinder")
 
-        cylinder.add_property('normal_x')
-        cylinder.add_property('normal_y')
-        cylinder.add_property('normal_z')
-        cylinder.add_property('normal_tmp_x')
-        cylinder.add_property('normal_tmp_y')
-        cylinder.add_property('normal_tmp_z')
+        cylinder.add_property('normal_x', stride=3)
+        cylinder.add_property('normal_y', stride=3)
+        cylinder.add_property('normal_z', stride=3)
+        cylinder.add_property('normal_tmp_x', stride=3)
+        cylinder.add_property('normal_tmp_y', stride=3)
+        cylinder.add_property('normal_tmp_z', stride=3)
 
         cylinder.set_output_arrays([
             'x', 'y', 'z', 'u', 'v', 'w', 'rho', 'h', 'm', 'p', 'pid', 'au',
-            'av', 'aw', 'tag', 'gid', 'fx', 'fy', 'fz', 'body_id',
-            'normal_x', 'normal_y', 'normal_z'
+            'av', 'aw', 'tag', 'gid', 'fx', 'fy', 'fz', 'body_id', 'normal_x',
+            'normal_y', 'normal_z'
         ])
 
         # add properties to boundary for Adami boundary boundary condition
@@ -192,7 +194,6 @@ class RigidFluidCoupling(Application):
             # Group(equations=[
             #     SmoothNormals(dest='tank', sources=['tank'])
             # ]),
-
             Group(equations=[
                 SourceNumberDensity(dest='tank', sources=['fluid']),
                 SolidWallPressureBC(dest='tank', sources=['fluid'], gy=self.gy,
@@ -286,42 +287,12 @@ class RigidFluidCoupling(Application):
                     rho0=self.rho0, dim=self.dim, alpha=0.2, nu=self.nu),
                 RigidFluidForce(dest='cylinder', sources=['fluid']),
                 SumUpExternalForces(dest='cylinder', sources=None)
-
             ])
         ]
 
         return MultiStageEquations([stage1, stage2])
 
-    def post_process(self):
-        if len(self.output_files) == 0:
-            return
-
-        from pysph.solver.utils import iter_output
-        files = self.output_files
-        iters = range(0, 177500, 1000)
-        logfile = self.info_filename.split('.')[0] + '.log'
-        files = get_files_at_given_times_from_log(files, iters, logfile)
-
-        # files = self.output_files
-        print(len(files))
-        t = []
-        sphere_ycom = []
-        for sd, array in iter_output(files, 'cylinder'):
-            _t = sd['t']
-            t.append(_t)
-            sphere_ycom.append(array.cm[1])
-
-        import matplotlib.pyplot as plt
-        t = np.asarray(t)
-
-        plt.plot(t, sphere_ycom, label='PySPH')
-        plt.xlabel("time")
-        plt.ylabel("y-com")
-        plt.legend()
-        plt.savefig("2000_density_cylinder_sink", dpi=300)
-
 
 if __name__ == '__main__':
     app = RigidFluidCoupling()
-    # app.run()
-    app.post_process()
+    app.run()

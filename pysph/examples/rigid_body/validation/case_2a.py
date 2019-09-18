@@ -93,13 +93,13 @@ class Case2a(Application):
     def create_scheme(self):
         # rbss = RigidBodySimpleScheme
         rbss = RigidBodySimpleScheme(bodies=['body'], solids=['tank'], dim=3,
-                                     rho0=self.rho0, kn=self.kn, mu=self.mu,
+                                     kn=self.kn, mu=self.mu,
                                      en=self.en, gz=-9.81)
         rbrms = RigidBodyRotationMatricesScheme(
-            bodies=['body'], solids=['tank'], dim=self.dim, rho0=self.rho0,
+            bodies=['body'], solids=['tank'], dim=self.dim,
             kn=self.kn, mu=self.mu, en=self.en, gz=-9.81)
         rbqs = RigidBodyQuaternionScheme(bodies=['body'], solids=['tank'],
-                                         dim=3, rho0=self.rho0, kn=self.kn,
+                                         dim=3, kn=self.kn,
                                          mu=self.mu, en=self.en, gz=-9.81)
         s = SchemeChooser(default='rbss', rbss=rbss, rbrms=rbrms, rbqs=rbqs)
         return s

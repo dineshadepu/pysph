@@ -78,6 +78,7 @@ class TensionTest(Application):
         # create a particle
         xp, yp = np.mgrid[0.:20 * self.radius:2. * self.radius, 0.:10 *
                           self.radius:2. * self.radius]
+        print(len(xp))
         # xp, yp = np.mgrid[0.:20*self.radius:2.*self.radius, 0.:2*self.radius:2.*self.radius]
         # xp, yp = np.mgrid[0.:4*self.radius:2.*self.radius, 0.:2*self.radius:2.*self.radius]
         xp = xp.ravel()
