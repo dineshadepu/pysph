@@ -19,7 +19,7 @@ from pysph.sph.integrator import EPECIntegrator
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
 from pysph.dem.discontinuous_dem.dem_nonlinear import (
-    get_particle_array_dem, RK2StepNonLinearDEM, ResetForces,
+    get_particle_array_dem_nonlinear, RK2StepNonLinearDEM, ResetForces,
     TsuijiNonLinearParticleWallForceStage1,
     TsuijiNonLinearParticleWallForceStage2)
 
@@ -48,7 +48,7 @@ class Test2(Application):
         m_inv = 1. / m
         I_inv = 1. / inertia
         h = 1.2 * rad_s
-        spheres_al = get_particle_array_dem(
+        spheres_al = get_particle_array_dem_nonlinear(
             x=xa, y=ya, u=u, h=h, m=m, rho=rho, rad_s=rad_s, yng_m=yng_m,
             poissons_ratio=poissons_ratio, shear_m=shear_m, dem_id=0,
             m_inv=m_inv, I_inv=I_inv, name="spheres_al")
@@ -62,7 +62,7 @@ class Test2(Application):
         yng_m = 7. * 1e10
         poissons_ratio = 0.30
         shear_m = yng_m / (2. * (1. + poissons_ratio))
-        wall_al = get_particle_array_dem(
+        wall_al = get_particle_array_dem_nonlinear(
             x=xw_a, y=yw_a, nx=nxw_a, ny=nyw_a, nz=0., rho=rho, yng_m=yng_m,
             poissons_ratio=poissons_ratio, shear_m=shear_m, dem_id=1,
             constants={'np': len(xw_a)}, name="wall_al")
@@ -81,7 +81,7 @@ class Test2(Application):
         m_inv = 1. / m
         I_inv = 1. / inertia
         h = 1.2 * rad_s
-        spheres_mg = get_particle_array_dem(
+        spheres_mg = get_particle_array_dem_nonlinear(
             x=xm, y=ym, u=u, h=h, m=m, rho=rho, rad_s=rad_s, yng_m=yng_m,
             poissons_ratio=poissons_ratio, shear_m=shear_m, dem_id=0,
             m_inv=m_inv, I_inv=I_inv, name="spheres_mg")
@@ -95,7 +95,7 @@ class Test2(Application):
         yng_m = 4. * 1e10
         poissons_ratio = 0.35
         shear_m = yng_m / (2. * (1. + poissons_ratio))
-        wall_mg = get_particle_array_dem(
+        wall_mg = get_particle_array_dem_nonlinear(
             x=xw_m, y=yw_m, nx=nxw_m, ny=nyw_m, nz=0., rho=rho, yng_m=yng_m,
             poissons_ratio=poissons_ratio, shear_m=shear_m, dem_id=1,
             constants={'np': len(xw_a)}, name="wall_mg")
@@ -221,4 +221,4 @@ class Test2(Application):
 if __name__ == '__main__':
     app = Test2()
     app.run()
-    # app.post_process()
+    app.post_process()

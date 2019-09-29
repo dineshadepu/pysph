@@ -17,7 +17,7 @@ from pysph.sph.integrator import EPECIntegrator
 from pysph.sph.equation import Group, MultiStageEquations
 from pysph.solver.application import Application
 from pysph.dem.discontinuous_dem.dem_nonlinear import (
-    get_particle_array_dem, RK2StepNonLinearDEM, ResetForces,
+    get_particle_array_dem_nonlinear, RK2StepNonLinearDEM, ResetForces,
     TsuijiNonLinearParticleWallForceStage1,
     TsuijiNonLinearParticleWallForceStage2)
 
@@ -50,7 +50,7 @@ class Test3(Application):
         m_inv = 1. / m
         I_inv = 1. / inertia
         h = 1.2 * rad_s
-        spheres_ao = get_particle_array_dem(
+        spheres_ao = get_particle_array_dem_nonlinear(
             x=xao, y=yao, u=u, h=h, m=m, rho=rho, rad_s=rad_s, yng_m=yng_m,
             poissons_ratio=poissons_ratio, shear_m=shear_m, dem_id=0,
             m_inv=m_inv, I_inv=I_inv, name="spheres_ao")
@@ -64,7 +64,7 @@ class Test3(Application):
         yng_m = 3.8 * 1e11
         poissons_ratio = 0.23
         shear_m = yng_m / (2. * (1. + poissons_ratio))
-        wall_ao = get_particle_array_dem(
+        wall_ao = get_particle_array_dem_nonlinear(
             x=xw_ao, y=yw_ao, nx=nxw_ao, ny=nyw_ao, nz=0., rho=rho,
             yng_m=yng_m, poissons_ratio=poissons_ratio, shear_m=shear_m,
             dem_id=1, constants={'np': len(xw_ao)}, name="wall_ao")
@@ -87,7 +87,7 @@ class Test3(Application):
         m_inv = 1. / m
         I_inv = 1. / inertia
         h = 1.2 * rad_s
-        spheres_ci = get_particle_array_dem(
+        spheres_ci = get_particle_array_dem_nonlinear(
             x=xci, y=yci, u=u, h=h, m=m, rho=rho, rad_s=rad_s, yng_m=yng_m,
             poissons_ratio=poissons_ratio, shear_m=shear_m, dem_id=0,
             m_inv=m_inv, I_inv=I_inv, name="spheres_ci")
@@ -101,7 +101,7 @@ class Test3(Application):
         yng_m = 1. * 1e11
         poissons_ratio = 0.25
         shear_m = yng_m / (2. * (1. + poissons_ratio))
-        wall_ci = get_particle_array_dem(
+        wall_ci = get_particle_array_dem_nonlinear(
             x=xw_ci, y=yw_ci, nx=nxw_ci, ny=nyw_ci, nz=0., rho=rho,
             yng_m=yng_m, poissons_ratio=poissons_ratio, shear_m=shear_m,
             dem_id=1, constants={'np': len(xw_ci)}, name="wall_ci")

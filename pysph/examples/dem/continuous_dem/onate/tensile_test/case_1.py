@@ -160,6 +160,49 @@ class TensionTest(Application):
         b.scalar = 'fx'
         '''.format(radius=self.radius))
 
+    def post_process(self):
+        if len(self.output_files) == 0:
+            return
+
+        from pysph.solver.utils import iter_output
+        files = self.output_files
+        t, fn_g, fn_l = [], [], []
+        for sd, arrays in iter_output(files):
+            glass, limestone = arrays['spheres_glass'], arrays[
+                'spheres_limestone'],
+            t.append(sd['t'])
+            fn_g.append(glass.fx[1])
+            fn_l.append(limestone.fx[1])
+        t = np.asarray(t)
+        fn_g = np.asarray(fn_g)
+        fn_l = np.asarray(fn_l)
+        t = t * 1e6
+        fn_g = fn_g * 1e-3
+        fn_l = fn_l * 1e-3
+
+        # Limestone data
+        # real data
+        data = np.loadtxt('chung_test_1_limestone.csv', delimiter=',')
+        tl_r, fn_l_r = data[:, 0], data[:, 1]
+
+        # glass data
+        # real data
+        data = np.loadtxt('chung_test_1_glass.csv', delimiter=',')
+        tg_r, fn_g_r = data[:, 0], data[:, 1]
+
+        import matplotlib.pyplot as plt
+        plt.scatter(t, fn_g, label='glass')
+        plt.scatter(t, fn_l, label='limestone')
+        plt.plot(tg_r, fn_g_r, label='glass_data')
+        plt.plot(tl_r, fn_l_r, label='limestone_data')
+        plt.legend()
+        plt.xlim([0.0, 60])
+        plt.ylim([0.0, 12])
+        import os
+        fig = os.path.join(self.output_dir, "force_vs_time.png")
+        plt.show()
+        plt.savefig(fig, dpi=300)
+
 
 if __name__ == '__main__':
     app = TensionTest()

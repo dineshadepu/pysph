@@ -127,11 +127,14 @@ class Cundall2dForceParticleParticleStage1(Equation):
             # scalar components of relative velocity in normal and
             # tangential directions
             vn = vij_x * nx + vij_y * ny
-            # vt = vij_x * tx + vij_y * ty
 
             # vector components of relative normal velocity
             vn_x = vn * nx
             vn_y = vn * ny
+
+            # vector components of relative tangential velocity
+            vt_x = vij_x - vn_x
+            vt_y = vij_y - vn_y
 
             # ------------- force computation -----------------------
             # total number of contacts of particle i in destination
@@ -167,6 +170,11 @@ class Cundall2dForceParticleParticleStage1(Equation):
             # normal force is computed as
             delta_fn_x = self.kn * vn_x * dtb2
             delta_fn_y = self.kn * vn_y * dtb2
+
+            # similarly for tangential force
+            # but it will be opposite to the relative displacement
+            delta_ft_x = - self.kn * vn_x * dtb2
+            delta_ft_y = - self.kn * vn_y * dtb2
 
             # assign it to the particle for post_processing
             d_free_cnt_delta_fn_x[found_at] = delta_fn_x
@@ -263,6 +271,11 @@ class Cundall2dForceParticleParticleStage2(Equation):
                 # normal force is computed as
                 delta_fn_x = self.kn * vn_x * dt
                 delta_fn_y = self.kn * vn_y * dt
+
+                # similarly for tangential force
+                # but it will be opposite to the relative displacement
+                delta_ft_x = - self.kn * vn_x * dt
+                delta_ft_y = - self.kn * vn_y * dt
 
                 # assign it to the particle for post_processing
                 d_free_cnt_delta_fn_x[found_at] = delta_fn_x
