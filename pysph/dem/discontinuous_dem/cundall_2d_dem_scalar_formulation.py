@@ -47,6 +47,10 @@ def get_particle_array_dem_2d_linear_cundall_scalar_formulation(
     pa.add_property('free_cnt_ft', stride=free_cnt_limit)
     pa.add_property('free_cnt_ft0', stride=free_cnt_limit)
 
+    # variables to debug
+    pa.add_property('free_cnt_overlap_n', stride=free_cnt_limit)
+    pa.add_property('free_cnt_overlap_n0', stride=free_cnt_limit)
+
     pa.add_property('total_no_free_cnt', type="int")
     pa.total_no_free_cnt[:] = 0
 
@@ -85,8 +89,8 @@ class Cundall2dForceParticleParticleStage1(Equation):
     def loop(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy, d_torz, d_wz,
              d_kn, d_kt, d_free_cnt_idx, d_free_cnt_idx_dem_id,
              d_total_no_free_cnt, d_dem_id, d_free_cnt_limit, RIJ, d_rad_s,
-             d_free_cnt_fn, d_free_cnt_ft, s_idx, s_m, s_rad_s, s_dem_id, s_wz,
-             s_kn, s_kt, s_x, s_y, s_u, s_v, dt):
+             d_free_cnt_fn, d_free_cnt_fn0, d_free_cnt_ft, s_idx, s_m, s_rad_s,
+             s_dem_id, s_wz, s_kn, s_kt, s_x, s_y, s_u, s_v, dt):
         p, q1, tot_cnts, j, found_at, found = declare('int', 6)
         overlap = -1.
         dtb2 = dt / 2.
@@ -153,6 +157,10 @@ class Cundall2dForceParticleParticleStage1(Equation):
                         found = 1
                         break
 
+            # find the normal and tangential stiffness
+            kn = (d_kn[d_idx] * s_kn[s_idx]) / (d_kn[d_idx] + s_kn[s_idx])
+            kt = (d_kt[d_idx] * s_kt[s_idx]) / (d_kt[d_idx] + s_kt[s_idx])
+
             # if the particle is not been tracked then assign an index in
             # tracking history.
             if found == 0:
@@ -160,10 +168,10 @@ class Cundall2dForceParticleParticleStage1(Equation):
                 d_free_cnt_idx[found_at] = s_idx
                 d_total_no_free_cnt[d_idx] += 1
                 d_free_cnt_idx_dem_id[found_at] = s_dem_id[s_idx]
-
-            # find the normal and tangential stiffness
-            kn = (d_kn[d_idx] * s_kn[s_idx]) / (d_kn[d_idx] + s_kn[s_idx])
-            kt = (d_kt[d_idx] * s_kt[s_idx]) / (d_kt[d_idx] + s_kt[s_idx])
+                # this leads to too much extra energy addition
+                # # new contact so initialize the force with current overlap
+                # d_free_cnt_fn[found_at] = kn * overlap
+                # d_free_cnt_fn0[found_at] = kn * overlap
 
             # ------------- Normal force computation ----------------
             # from the relative normal velocity we know the relative
@@ -399,6 +407,390 @@ class UpdateFreeContactsWithParticles(Equation):
 
                             # swap free contact normal and tangential forces
                             d_free_cnt_fn[k] = d_free_cnt_fn[last_idx_tmp]
+                            d_free_cnt_ft[k] = d_free_cnt_ft[last_idx_tmp]
+
+                            d_free_cnt_fn[last_idx_tmp] = 0.
+                            d_free_cnt_ft[last_idx_tmp] = 0.
+
+                            # make forces0 zero
+                            d_free_cnt_fn0[last_idx_tmp] = 0.
+                            d_free_cnt_ft0[last_idx_tmp] = 0.
+
+                            # swap tangential idx dem id
+                            d_free_cnt_idx_dem_id[k] = d_free_cnt_idx_dem_id[
+                                last_idx_tmp]
+                            d_free_cnt_idx_dem_id[last_idx_tmp] = -1
+
+                            # decrease the last_idx_tmp, since we swapped it to
+                            # -1
+                            last_idx_tmp -= 1
+
+                        # decrement the total contacts of the particle
+                        d_total_no_free_cnt[d_idx] -= 1
+                    else:
+                        k = k + 1
+                else:
+                    k = k + 1
+                count += 1
+
+
+class Cundall2dForceParticleFiniteWallStage1(Equation):
+    def __init__(self, dest, sources, mu=0.5, en=0.8):
+        # self.kn = kn
+        # self.kt = kt
+        # self.kt_1 = 1. / self.kt
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        # tmp = log(en)
+        # self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
+        super(Cundall2dForceParticleFiniteWallStage1,
+              self).__init__(dest, sources)
+
+    def initialize_pair(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy, d_wz,
+                        d_kn, d_kt, d_free_cnt_idx, d_free_cnt_idx_dem_id,
+                        d_total_no_free_cnt, d_dem_id, d_free_cnt_limit,
+                        d_torz, d_rad_s, d_free_cnt_fn, d_free_cnt_fn0,
+                        d_free_cnt_ft, s_x, s_y, s_u, s_v, s_wz, s_kn, s_kt,
+                        s_nx, s_ny, s_A_x, s_A_y, s_B_x, s_B_y, s_dem_id, s_np,
+                        dt):
+        i, n = declare('int', 2)
+        p, q1, tot_cnts, j, found_at, found, = declare('int', 6)
+        xij = declare('matrix(2)')
+        overlap = -1.
+        dtb2 = dt / 2.
+
+        n = s_np[0]
+        for i in range(n):
+            # check if the particle is in contact with the wall, this needs two
+            # checks, one is if the particle is in the limits of the wall,
+            # and if it is interacting
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            x_dot_n = xij[0] * s_nx[i] + xij[1] * s_ny[i]
+            overlap = d_rad_s[d_idx] - x_dot_n
+
+            # ---------- force computation starts ------------
+            # if particles are overlapping
+            if overlap > 0:
+                # normal vector passes from d_idx to s_idx
+                nx = -s_nx[i]
+                ny = -s_ny[i]
+
+                # the tangential direction is taken to be a vector
+                # rotated 90 degrees clock wise of normal vector.
+                tx = ny
+                ty = -nx
+
+                # find the velocity of the wall at the contact point of
+                # sphere and the wall
+                # first find the contact point
+                cp_x = xij[0] - x_dot_n * nx
+                cp_y = xij[1] - x_dot_n * ny
+
+                # using the contact point find the velocity
+                cp_u = s_u[i] - s_wz[i] * cp_y
+                cp_v = s_v[i] + s_wz[i] * cp_x
+
+                # the relative velocity of particle s_idx with respect to d_idx
+                vij_x = d_u[d_idx] - (d_wz[d_idx] * d_rad_s[d_idx]) * tx - cp_u
+                vij_y = d_v[d_idx] - (d_wz[d_idx] * d_rad_s[d_idx]) * ty - cp_v
+
+                # scalar components of relative velocity in normal and
+                # tangential directions
+                vn = vij_x * nx + vij_y * ny
+                vt = vij_x * tx + vij_y * ty
+
+                delta_dn = vn * dtb2
+                delta_dt = vt * dtb2
+
+                # # vector components of relative normal velocity
+                # vn_x = vn * nx
+                # vn_y = vn * ny
+
+                # # vector components of relative tangential velocity
+                # vt_x = vij_x - vn_x
+                # vt_y = vij_y - vn_y
+
+                # ------------- force computation -----------------------
+                # total number of contacts of particle i in destination
+                tot_cnts = d_total_no_free_cnt[d_idx]
+
+                # d_idx has a range of tracking indices with sources
+                # starting index is p
+                p = d_idx * d_free_cnt_limit[0]
+                # ending index is q -1
+                q1 = p + tot_cnts
+
+                # check if the particle is in the tracking list
+                # if so, then save the location at found_at
+                found = 0
+                for j in range(p, q1):
+                    if i == d_free_cnt_idx[j]:
+                        if s_dem_id[i] == d_free_cnt_idx_dem_id[j]:
+                            found_at = j
+                            found = 1
+                            break
+                # find the normal and tangential stiffness
+                kn = (d_kn[d_idx] * s_kn[i]) / (d_kn[d_idx] + s_kn[i])
+                kt = (d_kt[d_idx] * s_kt[i]) / (d_kt[d_idx] + s_kt[i])
+
+                # if the particle is not been tracked then assign an index in
+                # tracking history.
+                if found == 0:
+                    found_at = q1
+                    d_free_cnt_idx[found_at] = i
+                    d_total_no_free_cnt[d_idx] += 1
+                    d_free_cnt_idx_dem_id[found_at] = s_dem_id[i]
+                    # this leads to too much extra energy addition
+                    # # new contact so initialize the force with current overlap
+                    # d_free_cnt_fn[found_at] = kn * overlap
+                    # d_free_cnt_fn0[found_at] = kn * overlap
+
+                # ------------- Normal force computation ----------------
+                # from the relative normal velocity we know the relative
+                # displacement and from which the net increment of the
+                # normal force is computed as
+                delta_fn = kn * delta_dn
+
+                # similarly the scalar magnitude of tangential force
+                delta_ft = kt * delta_dt
+
+                # before adding the increment to the tracking force variable
+                # add the normal force due to the contact s_idx to the particle
+                # d_idx first
+                d_fx[d_idx] += (d_free_cnt_fn[found_at] * -nx +
+                                d_free_cnt_ft[found_at] * -tx)
+                d_fy[d_idx] += (d_free_cnt_fn[found_at] * -ny +
+                                d_free_cnt_ft[found_at] * -ty)
+                d_torz[d_idx] += d_free_cnt_ft[found_at] * d_rad_s[d_idx]
+
+                # increment the scalar normal force and tangential force
+                d_free_cnt_fn[found_at] += delta_fn
+                if d_free_cnt_fn[found_at] < 0.:
+                    d_free_cnt_fn[found_at] = 0.
+
+                d_free_cnt_ft[found_at] += delta_ft
+
+                # check for Coulomb friction
+                fs_max = self.mu * d_free_cnt_fn[found_at]
+                # get the sign of the tangential force
+                if d_free_cnt_ft[found_at] > 0.:
+                    sign = 1.
+                else:
+                    sign = -1.
+
+                if abs(d_free_cnt_ft[found_at]) > fs_max:
+                    d_free_cnt_ft[found_at] = fs_max * sign
+
+
+class Cundall2dForceParticleFiniteWallStage2(Equation):
+    def __init__(self, dest, sources, mu=0.5, en=0.8):
+        # self.kn = kn
+        # self.kt = kt
+        # self.kt_1 = 1. / self.kt
+        self.en = en
+        self.et = 0.5 * self.en
+        self.mu = mu
+        # tmp = log(en)
+        # self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
+        super(Cundall2dForceParticleFiniteWallStage2,
+              self).__init__(dest, sources)
+
+    def initialize_pair(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy, d_wz,
+                        d_kn, d_kt, d_free_cnt_idx, d_free_cnt_idx_dem_id,
+                        d_total_no_free_cnt, d_dem_id, d_free_cnt_limit,
+                        d_torz, d_rad_s, d_free_cnt_fn, d_free_cnt_ft,
+                        d_free_cnt_fn0, d_free_cnt_ft0, s_x, s_y, s_u, s_v,
+                        s_wz, s_kn, s_kt, s_nx, s_ny, s_A_x, s_A_y, s_B_x,
+                        s_B_y, s_dem_id, s_np, dt):
+        i, n = declare('int', 2)
+        p, q1, tot_cnts, j, found_at, found = declare('int', 6)
+        xij = declare('matrix(2)')
+        overlap = -1.
+
+        n = s_np[0]
+        for i in range(n):
+            # Force calculation starts
+            overlap = -1.
+            xij[0] = d_x[d_idx] - s_x[i]
+            xij[1] = d_y[d_idx] - s_y[i]
+            x_dot_n = xij[0] * s_nx[i] + xij[1] * s_ny[i]
+            overlap = d_rad_s[d_idx] - x_dot_n
+
+            # ---------- force computation starts ------------
+            # if particles are overlapping
+            if overlap > 0:
+                # normal vector passes from d_idx to s_idx
+                nx = -s_nx[i]
+                ny = -s_ny[i]
+
+                # the tangential direction is taken to be a vector
+                # rotated 90 degrees clock wise of normal vector.
+                tx = ny
+                ty = -nx
+
+                # find the velocity of the wall at the contact point of
+                # sphere and the wall
+                # first find the contact point
+                cp_x = xij[0] - x_dot_n * nx
+                cp_y = xij[1] - x_dot_n * ny
+
+                # using the contact point find the velocity
+                cp_u = s_u[i] - s_wz[i] * cp_y
+                cp_v = s_v[i] + s_wz[i] * cp_x
+
+                # the relative velocity of particle s_idx with respect to d_idx
+                vij_x = d_u[d_idx] - (d_wz[d_idx] * d_rad_s[d_idx]) * tx - cp_u
+                vij_y = d_v[d_idx] - (d_wz[d_idx] * d_rad_s[d_idx]) * ty - cp_v
+
+                # scalar components of relative velocity in normal and
+                # tangential directions
+                vn = vij_x * nx + vij_y * ny
+                vt = vij_x * tx + vij_y * ty
+
+                delta_dn = vn * dt
+                delta_dt = vt * dt
+
+                # # vector components of relative normal velocity
+                # vn_x = vn * nx
+                # vn_y = vn * ny
+
+                # # vector components of relative tangential velocity
+                # vt_x = vij_x - vn_x
+                # vt_y = vij_y - vn_y
+
+                # ------------- force computation -----------------------
+                # total number of contacts of particle i in destination
+                tot_cnts = d_total_no_free_cnt[d_idx]
+
+                # d_idx has a range of tracking indices with sources
+                # starting index is p
+                p = d_idx * d_free_cnt_limit[0]
+                # ending index is q -1
+                q1 = p + tot_cnts
+
+                # check if the particle is in the tracking list
+                # if so, then save the location at found_at
+                found = 0
+                for j in range(p, q1):
+                    if i == d_free_cnt_idx[j]:
+                        if s_dem_id[i] == d_free_cnt_idx_dem_id[j]:
+                            found_at = j
+                            found = 1
+                            break
+
+                # Already assigned contacts are dealt in stage2. This is for
+                # algorithm simplicity. so we don't add new particles
+                if found == 1:
+                    # find the normal and tangential stiffness
+                    kn = (d_kn[d_idx] * s_kn[i]) / (d_kn[d_idx] + s_kn[i])
+                    kt = (d_kt[d_idx] * s_kt[i]) / (d_kt[d_idx] + s_kt[i])
+
+                    # ------------- Normal force computation ----------------
+                    # from the relative normal velocity we know the relative
+                    # displacement and from which the net increment of the
+                    # normal force is computed as
+                    delta_fn = kn * delta_dn
+
+                    # similarly the scalar magnitude of tangential force
+                    delta_ft = kt * delta_dt
+
+                    # before adding the increment to the tracking force variable
+                    # add the normal force due to the contact s_idx to the particle
+                    # d_idx first
+                    d_fx[d_idx] += (d_free_cnt_fn[found_at] * -nx +
+                                    d_free_cnt_ft[found_at] * -tx)
+                    d_fy[d_idx] += (d_free_cnt_fn[found_at] * -ny +
+                                    d_free_cnt_ft[found_at] * -ty)
+                    d_torz[d_idx] += d_free_cnt_ft[found_at] * d_rad_s[d_idx]
+
+                    # increment the scalar normal force
+                    # increment the scalar normal force
+                    d_free_cnt_fn[found_at] = (d_free_cnt_fn0[found_at] +
+                                               delta_fn)
+                    if d_free_cnt_fn[found_at] < 0.:
+                        d_free_cnt_fn[found_at] = 0.
+                    d_free_cnt_ft[found_at] = (d_free_cnt_ft0[found_at] +
+                                               delta_ft)
+
+                    # check for Coulomb friction
+                    fs_max = self.mu * d_free_cnt_fn[found_at]
+                    # get the sign of the tangential force
+                    if d_free_cnt_ft[found_at] > 0.:
+                        sign = 1.
+                    else:
+                        sign = -1.
+
+                    if abs(d_free_cnt_ft[found_at]) > fs_max:
+                        d_free_cnt_ft[found_at] = fs_max * sign
+
+
+class UpdateFreeContactsWithFiniteWall(Equation):
+    def initialize_pair(self, d_idx, d_x, d_y, d_rad_s, d_total_no_free_cnt,
+                        d_free_cnt_idx, d_free_cnt_limit,
+                        d_free_cnt_idx_dem_id, d_free_cnt_fn, d_free_cnt_ft,
+                        d_free_cnt_fn0, d_free_cnt_ft0, s_x, s_y, s_z, s_nx,
+                        s_ny, s_dem_id):
+        p = declare('int')
+        count = declare('int')
+        k = declare('int')
+        xij = declare('matrix(2)')
+        last_idx_tmp = declare('int')
+        sidx = declare('int')
+        dem_id = declare('int')
+
+        idx_total_cnts = declare('int')
+        idx_total_cnts = d_total_no_free_cnt[d_idx]
+
+        # particle idx contacts has range of indices
+        # and the first index would be
+        p = d_idx * d_free_cnt_limit[0]
+        last_idx_tmp = p + idx_total_cnts - 1
+        k = p
+        count = 0
+
+        # loop over all the contacts of particle d_idx
+        while count < idx_total_cnts:
+            # The index of the particle with which
+            # d_idx in contact is
+            sidx = d_free_cnt_idx[k]
+            # get the dem id of the particle
+            dem_id = d_free_cnt_idx_dem_id[k]
+
+            if sidx == -1:
+                break
+            else:
+                if dem_id == s_dem_id[sidx]:
+                    xij[0] = d_x[d_idx] - s_x[sidx]
+                    xij[1] = d_y[d_idx] - s_y[sidx]
+                    overlap = d_rad_s[d_idx] - (xij[0] * s_nx[sidx] +
+                                                xij[1] * s_ny[sidx])
+
+                    if overlap <= 0.:
+                        # if the swap index is the current index then
+                        # simply make it to null contact.
+                        if k == last_idx_tmp:
+                            d_free_cnt_idx[k] = -1
+                            d_free_cnt_idx_dem_id[k] = -1
+
+                            d_free_cnt_fn[k] = 0.
+                            d_free_cnt_ft[k] = 0.
+
+                            # make forces0 zero
+                            d_free_cnt_fn0[k] = 0.
+                            d_free_cnt_ft0[k] = 0.
+
+                        else:
+                            # swap the current tracking index with the final
+                            # contact index
+                            d_free_cnt_idx[k] = d_free_cnt_idx[last_idx_tmp]
+                            d_free_cnt_idx[last_idx_tmp] = -1
+
+                            # swap free contact normal and tangential forces
+                            d_free_cnt_fn[k] = d_free_cnt_fn[last_idx_tmp]
+
                             d_free_cnt_ft[k] = d_free_cnt_ft[last_idx_tmp]
 
                             d_free_cnt_fn[last_idx_tmp] = 0.
@@ -827,389 +1219,6 @@ class UpdateFreeContactsWithInfinityWall(Equation):
                             d_free_cnt_fn_y0[last_idx_tmp] = 0.
                             d_free_cnt_ft_x0[last_idx_tmp] = 0.
                             d_free_cnt_ft_y0[last_idx_tmp] = 0.
-
-                            # decrease the last_idx_tmp, since we swapped it to
-                            # -1
-                            last_idx_tmp -= 1
-
-                        # decrement the total contacts of the particle
-                        d_total_no_free_cnt[d_idx] -= 1
-                    else:
-                        k = k + 1
-                else:
-                    k = k + 1
-                count += 1
-
-
-class Cundall2dForceParticleFiniteWallStage1(Equation):
-    def __init__(self, dest, sources, mu=0.5, en=0.8):
-        # self.kn = kn
-        # self.kt = kt
-        # self.kt_1 = 1. / self.kt
-        self.en = en
-        self.et = 0.5 * self.en
-        self.mu = mu
-        # tmp = log(en)
-        # self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall2dForceParticleFiniteWallStage1,
-              self).__init__(dest, sources)
-
-    def loop(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy, d_wz, d_kn,
-             d_kt, d_free_cnt_idx, d_free_cnt_idx_dem_id, d_total_no_free_cnt,
-             d_dem_id, d_free_cnt_limit, d_torz, RIJ, d_rad_s, d_free_cnt_fn,
-             d_free_cnt_ft, s_x, s_y, s_u, s_v, s_wz, s_kn, s_kt, s_nx, s_ny,
-             s_A_x, s_A_y, s_B_x, s_B_y, s_dem_id, s_np, dt):
-        i, n = declare('int', 2)
-        p, q1, tot_cnts, j, found_at, found, = declare('int', 6)
-        xij = declare('matrix(2)')
-        overlap = -1.
-        dtb2 = dt / 2.
-
-        n = s_np[0]
-        for i in range(n):
-            # check if the particle is in contact with the wall, this needs two
-            # checks, one is if the particle is in the limits of the wall,
-            # and if it is interacting
-            overlap = -1.
-            xij[0] = d_x[d_idx] - s_x[i]
-            xij[1] = d_y[d_idx] - s_y[i]
-            x_dot_n = xij[0] * s_nx[i] + xij[1] * s_ny[i]
-            overlap = d_rad_s[d_idx] - x_dot_n
-
-            # ---------- force computation starts ------------
-            # if particles are overlapping
-            if overlap > 0:
-                # normal vector passes from d_idx to s_idx
-                nx = -s_nx[i]
-                ny = -s_ny[i]
-
-                # the tangential direction is taken to be a vector
-                # rotated 90 degrees clock wise of normal vector.
-                tx = ny
-                ty = -nx
-
-                # find the velocity of the wall at the contact point of
-                # sphere and the wall
-                # first find the contact point
-                cp_x = xij[0] - x_dot_n * nx
-                cp_y = xij[1] - x_dot_n * ny
-
-                # using the contact point find the velocity
-                cp_u = s_u[i] - s_wz[i] * cp_y
-                cp_v = s_v[i] + s_wz[i] * cp_x
-
-                # ##############################################
-                # TODO
-                # THIS HAS TO BE FIXED
-                # TODO: Compute the velocity of the wall near the impact
-                # the relative velocity of particle s_idx with respect to d_idx
-                vij_x = d_u[d_idx] - (d_wz[d_idx] * d_rad_s[d_idx]) * tx - cp_u
-                vij_y = d_v[d_idx] - (d_wz[d_idx] * d_rad_s[d_idx]) * ty - cp_v
-                # ##############################################
-
-                # scalar components of relative velocity in normal and
-                # tangential directions
-                vn = vij_x * nx + vij_y * ny
-                vt = vij_x * tx + vij_y * ty
-
-                delta_dn = vn * dtb2
-                delta_dt = vt * dtb2
-
-                # # vector components of relative normal velocity
-                # vn_x = vn * nx
-                # vn_y = vn * ny
-
-                # # vector components of relative tangential velocity
-                # vt_x = vij_x - vn_x
-                # vt_y = vij_y - vn_y
-
-                # ------------- force computation -----------------------
-                # total number of contacts of particle i in destination
-                tot_cnts = d_total_no_free_cnt[d_idx]
-
-                # d_idx has a range of tracking indices with sources
-                # starting index is p
-                p = d_idx * d_free_cnt_limit[0]
-                # ending index is q -1
-                q1 = p + tot_cnts
-
-                # check if the particle is in the tracking list
-                # if so, then save the location at found_at
-                found = 0
-                for j in range(p, q1):
-                    if i == d_free_cnt_idx[j]:
-                        if s_dem_id[i] == d_free_cnt_idx_dem_id[j]:
-                            found_at = j
-                            found = 1
-                            break
-
-                # if the particle is not been tracked then assign an index in
-                # tracking history.
-                if found == 0:
-                    found_at = q1
-                    d_free_cnt_idx[found_at] = i
-                    d_total_no_free_cnt[d_idx] += 1
-                    d_free_cnt_idx_dem_id[found_at] = s_dem_id[i]
-
-                # find the normal and tangential stiffness
-                kn = (d_kn[d_idx] * s_kn[i]) / (d_kn[d_idx] + s_kn[i])
-                kt = (d_kt[d_idx] * s_kt[i]) / (d_kt[d_idx] + s_kt[i])
-
-                # ------------- Normal force computation ----------------
-                # from the relative normal velocity we know the relative
-                # displacement and from which the net increment of the
-                # normal force is computed as
-                delta_fn = kn * delta_dn
-
-                # similarly the scalar magnitude of tangential force
-                delta_ft = kt * delta_dt
-
-                # before adding the increment to the tracking force variable
-                # add the normal force due to the contact s_idx to the particle
-                # d_idx first
-                d_fx[d_idx] += (d_free_cnt_fn[found_at] * -nx +
-                                d_free_cnt_ft[found_at] * -tx)
-                d_fy[d_idx] += (d_free_cnt_fn[found_at] * -ny +
-                                d_free_cnt_ft[found_at] * -ty)
-                d_torz[d_idx] += d_free_cnt_ft[found_at] * d_rad_s[d_idx]
-
-                # increment the scalar normal force and tangential force
-                d_free_cnt_fn[found_at] += delta_fn
-                if d_free_cnt_fn[found_at] < 0.:
-                    d_free_cnt_fn[found_at] = 0.
-
-                d_free_cnt_ft[found_at] += delta_ft
-
-                # check for Coulomb friction
-                fs_max = self.mu * abs(d_free_cnt_fn[found_at])
-                # get the sign of the tangential force
-                if d_free_cnt_ft[found_at] > 0.:
-                    sign = 1.
-                else:
-                    sign = -1.
-
-                if abs(d_free_cnt_ft[found_at]) > fs_max:
-                    d_free_cnt_ft[found_at] = fs_max * sign
-
-
-class Cundall2dForceParticleFiniteWallStage2(Equation):
-    def __init__(self, dest, sources, mu=0.5, en=0.8):
-        # self.kn = kn
-        # self.kt = kt
-        # self.kt_1 = 1. / self.kt
-        self.en = en
-        self.et = 0.5 * self.en
-        self.mu = mu
-        # tmp = log(en)
-        # self.alpha = 2. * sqrt(kn) * abs(tmp) / (sqrt(np.pi**2. + tmp**2.))
-        super(Cundall2dForceParticleFiniteWallStage2,
-              self).__init__(dest, sources)
-
-    def loop(self, d_idx, d_m, d_x, d_y, d_u, d_v, d_fx, d_fy, d_wz, d_kn,
-             d_kt, d_free_cnt_idx, d_free_cnt_idx_dem_id, d_total_no_free_cnt,
-             d_dem_id, d_free_cnt_limit, d_torz, RIJ, d_rad_s, d_free_cnt_fn,
-             d_free_cnt_ft, d_free_cnt_fn0, d_free_cnt_ft0, s_x, s_y, s_u, s_v,
-             s_wz, s_kn, s_kt, s_nx, s_ny, s_A_x, s_A_y, s_B_x, s_B_y,
-             s_dem_id, s_np, dt):
-        i, n = declare('int', 2)
-        p, q1, tot_cnts, j, found_at, found = declare('int', 6)
-        xij = declare('matrix(2)')
-        overlap = -1.
-        dtb2 = dt / 2.
-
-        n = s_np[0]
-        for i in range(n):
-            # Force calculation starts
-            overlap = -1.
-            xij[0] = d_x[d_idx] - s_x[i]
-            xij[1] = d_y[d_idx] - s_y[i]
-            x_dot_n = xij[0] * s_nx[i] + xij[1] * s_ny[i]
-            overlap = d_rad_s[d_idx] - x_dot_n
-
-            # ---------- force computation starts ------------
-            # if particles are overlapping
-            if overlap > 0:
-                # normal vector passes from d_idx to s_idx
-                nx = -s_nx[i]
-                ny = -s_ny[i]
-
-                # the tangential direction is taken to be a vector
-                # rotated 90 degrees clock wise of normal vector.
-                tx = ny
-                ty = -nx
-
-                # find the velocity of the wall at the contact point of
-                # sphere and the wall
-                # first find the contact point
-                cp_x = xij[0] - x_dot_n * nx
-                cp_y = xij[1] - x_dot_n * ny
-
-                # using the contact point find the velocity
-                cp_u = s_u[i] - s_wz[i] * cp_y
-                cp_v = s_v[i] + s_wz[i] * cp_x
-
-                # ##############################################
-                # TODO
-                # THIS HAS TO BE FIXED
-                # TODO: Compute the velocity of the wall near the impact
-                # the relative velocity of particle s_idx with respect to d_idx
-                vij_x = d_u[d_idx] - (d_wz[d_idx] * d_rad_s[d_idx]) * tx - cp_u
-                vij_y = d_v[d_idx] - (d_wz[d_idx] * d_rad_s[d_idx]) * ty - cp_v
-                # ##############################################
-
-                # scalar components of relative velocity in normal and
-                # tangential directions
-                vn = vij_x * nx + vij_y * ny
-                vt = vij_x * tx + vij_y * ty
-
-                delta_dn = vn * dtb2
-                delta_dt = vt * dtb2
-
-                # # vector components of relative normal velocity
-                # vn_x = vn * nx
-                # vn_y = vn * ny
-
-                # # vector components of relative tangential velocity
-                # vt_x = vij_x - vn_x
-                # vt_y = vij_y - vn_y
-
-                # ------------- force computation -----------------------
-                # total number of contacts of particle i in destination
-                tot_cnts = d_total_no_free_cnt[d_idx]
-
-                # d_idx has a range of tracking indices with sources
-                # starting index is p
-                p = d_idx * d_free_cnt_limit[0]
-                # ending index is q -1
-                q1 = p + tot_cnts
-
-                # check if the particle is in the tracking list
-                # if so, then save the location at found_at
-                found = 0
-                for j in range(p, q1):
-                    if i == d_free_cnt_idx[j]:
-                        if s_dem_id[i] == d_free_cnt_idx_dem_id[j]:
-                            found_at = j
-                            found = 1
-                            break
-
-                # Already assigned contacts are dealt in stage2. This is for
-                # algorithm simplicity. so we don't add new particles
-                if found == 1:
-                    # find the normal and tangential stiffness
-                    kn = (d_kn[d_idx] * s_kn[i]) / (d_kn[d_idx] + s_kn[i])
-                    kt = (d_kt[d_idx] * s_kt[i]) / (d_kt[d_idx] + s_kt[i])
-
-                    # ------------- Normal force computation ----------------
-                    # from the relative normal velocity we know the relative
-                    # displacement and from which the net increment of the
-                    # normal force is computed as
-                    delta_fn = kn * delta_dn
-
-                    # similarly the scalar magnitude of tangential force
-                    delta_ft = kt * delta_dt
-
-                    # before adding the increment to the tracking force variable
-                    # add the normal force due to the contact s_idx to the particle
-                    # d_idx first
-                    d_fx[d_idx] += d_free_cnt_fn[found_at] * -nx
-                    d_fy[d_idx] += d_free_cnt_fn[found_at] * -ny
-                    d_torz[d_idx] += d_free_cnt_ft[found_at] * d_rad_s[d_idx]
-
-                    # increment the scalar normal force
-                    # increment the scalar normal force
-                    d_free_cnt_fn[found_at] = (d_free_cnt_fn0[found_at] +
-                                               delta_fn)
-                    if d_free_cnt_fn[found_at] < 0.:
-                        d_free_cnt_fn[found_at] = 0.
-                    d_free_cnt_ft[found_at] = (d_free_cnt_ft0[found_at] +
-                                               delta_ft)
-
-                    # check for Coulomb friction
-                    fs_max = self.mu * abs(d_free_cnt_fn[found_at])
-                    # get the sign of the tangential force
-                    if d_free_cnt_ft[found_at] > 0.:
-                        sign = 1.
-                    else:
-                        sign = -1.
-
-                    if abs(d_free_cnt_ft[found_at]) > fs_max:
-                        d_free_cnt_ft[found_at] = fs_max * sign
-
-
-class UpdateFreeContactsWithFiniteWall(Equation):
-    def initialize_pair(self, d_idx, d_x, d_y, d_rad_s, d_total_no_free_cnt,
-                        d_free_cnt_idx, d_free_cnt_limit,
-                        d_free_cnt_idx_dem_id, d_free_cnt_fn, d_free_cnt_ft,
-                        d_free_cnt_fn0, d_free_cnt_ft0, s_x, s_y, s_z, s_nx,
-                        s_ny, s_dem_id):
-        p = declare('int')
-        count = declare('int')
-        k = declare('int')
-        xij = declare('matrix(2)')
-        last_idx_tmp = declare('int')
-        sidx = declare('int')
-        dem_id = declare('int')
-
-        idx_total_cnts = declare('int')
-        idx_total_cnts = d_total_no_free_cnt[d_idx]
-
-        # particle idx contacts has range of indices
-        # and the first index would be
-        p = d_idx * d_free_cnt_limit[0]
-        last_idx_tmp = p + idx_total_cnts - 1
-        k = p
-        count = 0
-
-        # loop over all the contacts of particle d_idx
-        while count < idx_total_cnts:
-            # The index of the particle with which
-            # d_idx in contact is
-            sidx = d_free_cnt_idx[k]
-            # get the dem id of the particle
-            dem_id = d_free_cnt_idx_dem_id[k]
-
-            if sidx == -1:
-                break
-            else:
-                if dem_id == s_dem_id[sidx]:
-                    xij[0] = d_x[d_idx] - s_x[sidx]
-                    xij[1] = d_y[d_idx] - s_y[sidx]
-                    overlap = d_rad_s[d_idx] - (xij[0] * s_nx[sidx] +
-                                                xij[1] * s_ny[sidx])
-
-                    if overlap <= 0.:
-                        # if the swap index is the current index then
-                        # simply make it to null contact.
-                        if k == last_idx_tmp:
-                            d_free_cnt_idx[k] = -1
-                            d_free_cnt_idx_dem_id[k] = -1
-
-                            d_free_cnt_fn[k] = 0.
-                            d_free_cnt_ft[k] = 0.
-
-                            # make forces0 zero
-                            d_free_cnt_fn0[k] = 0.
-                            d_free_cnt_ft0[k] = 0.
-
-                        else:
-                            # swap the current tracking index with the final
-                            # contact index
-                            d_free_cnt_idx[k] = d_free_cnt_idx[last_idx_tmp]
-                            d_free_cnt_idx[last_idx_tmp] = -1
-
-                            # swap free contact normal and tangential forces
-                            d_free_cnt_fn[k] = d_free_cnt_fn[last_idx_tmp]
-
-                            d_free_cnt_ft[k] = d_free_cnt_ft[last_idx_tmp]
-
-                            d_free_cnt_fn[last_idx_tmp] = 0.
-                            d_free_cnt_ft[last_idx_tmp] = 0.
-
-                            # swap tangential idx dem id
-                            d_free_cnt_idx_dem_id[k] = d_free_cnt_idx_dem_id[
-                                last_idx_tmp]
-                            d_free_cnt_idx_dem_id[last_idx_tmp] = -1
 
                             # decrease the last_idx_tmp, since we swapped it to
                             # -1
