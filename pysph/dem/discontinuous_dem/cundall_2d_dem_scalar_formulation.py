@@ -47,10 +47,6 @@ def get_particle_array_dem_2d_linear_cundall_scalar_formulation(
     pa.add_property('free_cnt_ft', stride=free_cnt_limit)
     pa.add_property('free_cnt_ft0', stride=free_cnt_limit)
 
-    # variables to debug
-    pa.add_property('free_cnt_overlap_n', stride=free_cnt_limit)
-    pa.add_property('free_cnt_overlap_n0', stride=free_cnt_limit)
-
     pa.add_property('total_no_free_cnt', type="int")
     pa.total_no_free_cnt[:] = 0
 

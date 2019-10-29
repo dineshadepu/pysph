@@ -652,6 +652,7 @@ class DEMParticleInfinityWallForceStage1(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha_1 = - tmp * sqrt(5. / (tmp**2. + pi**2.))
+        self.betaeff = tmp * sqrt(1. / (tmp**2. + pi**2.))
 
         super(DEMParticleInfinityWallForceStage1, self).__init__(dest, sources)
 
@@ -734,15 +735,19 @@ class DEMParticleInfinityWallForceStage1(Equation):
                 rd = d_rad_s[d_idx]
                 if self.kn == -1:
                     r_eff = rd
+                    sqrtval = sqrt(r_eff * overlap)
 
                     E_eff = Ed / (1. - pd**2.)
                     G_eff = Gd / (2. - pd)
 
-                    kn_tmp = 4. / 3. * E_eff * sqrt(r_eff)
-                    kn = 4. / 3. * E_eff * sqrt(r_eff * overlap)
+                    Sn = 2. * E_eff * sqrtval
+                    St = 8. * G_eff * sqrtval
+
+                    # kn_tmp = 4. / 3. * E_eff * sqrt(r_eff)
+                    kn = 4. / 3. * E_eff * sqrtval
+
                     kt_tmp = 16. / 3. * G_eff * sqrt(r_eff)
-                    kt = 16. / 3. * G_eff * sqrt(r_eff * overlap)
-                    kt_1 = 1. / kt
+                    kt = St
 
                     # tsuiji paper gave
                     # E_eff = Ed * Es / (Ed * (1. - ps**2.) + Es * (1. - pd**2.))
@@ -759,10 +764,19 @@ class DEMParticleInfinityWallForceStage1(Equation):
                 # Method" paper.
                 # compute the damping constants
                 m_eff = d_m[d_idx]
+                sqrtFiveOverSix = 0.91287092917527685576161630466800355658790782499663875
+
                 if self.kn == -1:
-                    eta_n = self.alpha_1 * sqrt(m_eff * kn_tmp) * overlap**0.25
+                    betaeff = self.betaeff
+                    eta_n = -2. * sqrtFiveOverSix * betaeff * sqrt(Sn * m_eff)
+                    eta_t = -2. * sqrtFiveOverSix * betaeff * sqrt(St * m_eff)
+                    # eta_n = self.alpha_1 * sqrt(m_eff * kn_tmp) * overlap**0.25
                 else:
                     eta_n = 1.
+                    eta_t = 0.5 * eta_n
+
+                # make eta_t zero
+                eta_t = 0.
 
                 # --------------------------------------------------------------
                 # --------------------------------------------------------------
@@ -799,9 +813,6 @@ class DEMParticleInfinityWallForceStage1(Equation):
                     d_free_cnt_idx[found_at] = i
                     d_total_no_free_cnt[d_idx] += 1
                     d_free_cnt_idx_dem_id[found_at] = s_dem_id[i]
-
-                # compute the damping constants
-                eta_t = 0.5 * eta_n
 
                 # rotate the tangential spring to the current plane
                 tmp = (d_free_cnt_tng_disp_x[found_at] * nx +
@@ -847,9 +858,9 @@ class DEMParticleInfinityWallForceStage1(Equation):
                         d_free_cnt_tng_disp_x[found_at] = -1. / kt * (
                             fn_mu * tx + eta_t * vt_x)
                         d_free_cnt_tng_disp_y[found_at] = -1. / kt * (
-                            fn_mu * ty + eta_t * vt_x)
+                            fn_mu * ty + eta_t * vt_y)
                         d_free_cnt_tng_disp_z[found_at] = -1. / kt * (
-                            fn_mu * tz + eta_t * vt_x)
+                            fn_mu * tz + eta_t * vt_z)
 
                         # and also adjust the spring elongation
                         # at time t, which is used at stage 2 integrator
@@ -906,6 +917,7 @@ class DEMParticleInfinityWallForceStage2(Equation):
         self.mu = mu
         tmp = log(en)
         self.alpha_1 = - tmp * sqrt(5. / (tmp**2. + pi**2.))
+        self.betaeff = tmp * sqrt(1. / (tmp**2. + pi**2.))
         super(DEMParticleInfinityWallForceStage2, self).__init__(dest, sources)
 
     def initialize_pair(self, d_idx, d_m, d_u, d_v, d_w, d_x, d_y, d_z, d_fx,
@@ -985,15 +997,19 @@ class DEMParticleInfinityWallForceStage2(Equation):
                 rd = d_rad_s[d_idx]
                 if self.kn == -1:
                     r_eff = rd
+                    sqrtval = sqrt(r_eff * overlap)
 
                     E_eff = Ed / (1. - pd**2.)
                     G_eff = Gd / (2. - pd)
 
-                    kn_tmp = 4. / 3. * E_eff * sqrt(r_eff)
-                    kn = 4. / 3. * E_eff * sqrt(r_eff * overlap)
+                    Sn = 2. * E_eff * sqrtval
+                    St = 8. * G_eff * sqrtval
+
+                    # kn_tmp = 4. / 3. * E_eff * sqrt(r_eff)
+                    kn = 4. / 3. * E_eff * sqrtval
+
                     kt_tmp = 16. / 3. * G_eff * sqrt(r_eff)
-                    kt = 16. / 3. * G_eff * sqrt(r_eff * overlap)
-                    kt_1 = 1. / kt
+                    kt = St
 
                     # tsuiji paper gave
                     # E_eff = Ed * Es / (Ed * (1. - ps**2.) + Es * (1. - pd**2.))
@@ -1009,10 +1025,19 @@ class DEMParticleInfinityWallForceStage2(Equation):
                 # Method" paper.
                 # compute the damping constants
                 m_eff = d_m[d_idx]
+                sqrtFiveOverSix = 0.91287092917527685576161630466800355658790782499663875
+
                 if self.kn == -1:
-                    eta_n = self.alpha_1 * sqrt(m_eff * kn_tmp) * overlap**0.25
+                    betaeff = self.betaeff
+                    eta_n = -2. * sqrtFiveOverSix * betaeff * sqrt(Sn * m_eff)
+                    eta_t = -2. * sqrtFiveOverSix * betaeff * sqrt(St * m_eff)
+                    # eta_n = self.alpha_1 * sqrt(m_eff * kn_tmp) * overlap**0.25
                 else:
                     eta_n = 1.
+                    eta_t = 0.5 * eta_n
+
+                # make eta_t zero
+                eta_t = 0.
 
                 # normal force
                 kn_overlap = kn * overlap
@@ -1045,9 +1070,6 @@ class DEMParticleInfinityWallForceStage2(Equation):
                 ft0_z = 0.
                 # don't compute the tangential force if not tracked
                 if found == 1:
-                    # compute the damping constants
-                    eta_t = 0.5 * eta_n
-
                     # rotate the tangential spring to the current plane
                     tmp = (d_free_cnt_tng_disp_x[found_at] * nx +
                            d_free_cnt_tng_disp_y[found_at] * ny +
