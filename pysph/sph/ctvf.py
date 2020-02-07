@@ -5,6 +5,7 @@ Corrected TVF equations
 
 from pysph.sph.equation import Equation
 from compyle.api import declare
+from math import sqrt
 
 
 def add_ctvf_properties(pa):
@@ -32,6 +33,9 @@ def add_ctvf_properties(pa):
     # check for boundary particle
     pa.add_property('is_boundary', type='int')
     pa.add_property('is_boundary_second', type='int')
+
+    # variable h for background pressure
+    pa.add_property('h_b')
 
 
 class SummationDensityTmp(Equation):
@@ -237,9 +241,9 @@ class IdentifyBoundaryParticle2(Equation):
         # set all of them to be boundary
         d_is_boundary_second[d_idx] = d_is_boundary[d_idx]
 
-    def loop_all(self, d_idx, d_x, d_y, d_z, d_rho, d_h, d_is_boundary, d_is_boundary_second,
-                 d_normal, d_normal_norm, s_m, s_x, s_y, s_z, s_h, s_is_boundary, SPH_KERNEL,
-                 NBRS, N_NBRS):
+    def loop_all(self, d_idx, d_x, d_y, d_z, d_rho, d_h, d_is_boundary,
+                 d_is_boundary_second, d_normal, d_normal_norm, s_m, s_x, s_y,
+                 s_z, s_h, s_is_boundary, SPH_KERNEL, NBRS, N_NBRS):
         i = declare('int')
         idx3 = declare('int')
         s_idx = declare('int')
@@ -264,13 +268,117 @@ class IdentifyBoundaryParticle2(Equation):
                                          d_normal[idx3 + 1] * xij[1] +
                                          d_normal[idx3 + 2] * xij[2])
 
-                        if s_is_boundary[s_idx] == 1 and xijdotnormal < self.fac:
+                        if s_is_boundary[
+                                s_idx] == 1 and xijdotnormal < self.fac:
                             d_is_boundary_second[d_idx] = 1
                             break
 
     def post_loop(self, d_idx, d_is_boundary, d_is_boundary_second):
         # set all of them to be boundary
         d_is_boundary[d_idx] = d_is_boundary_second[d_idx]
+
+
+class IdentifyBoundaryParticleCosAngle(Equation):
+    def __init__(self, dest, sources):
+        super(IdentifyBoundaryParticleCosAngle, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_is_boundary):
+        # set all of them to be boundary
+        d_is_boundary[d_idx] = 0
+
+    def loop_all(self, d_idx, d_x, d_y, d_z, d_rho, d_h, d_is_boundary,
+                 d_normal, d_normal_norm, s_m, s_x, s_y, s_z, s_h, SPH_KERNEL,
+                 NBRS, N_NBRS):
+        i = declare('int')
+        idx3 = declare('int')
+        s_idx = declare('int')
+        xij = declare('matrix(3)')
+        idx3 = 3 * d_idx
+
+        normal_norm = (d_normal[idx3]**2. + d_normal[idx3 + 1]**2. +
+                       d_normal[idx3 + 2]**2.)**0.5
+
+        d_normal_norm[d_idx] = normal_norm
+
+        if d_normal_norm[d_idx] > 1e-12:
+            # first set the particle as boundary if its normal exists
+            d_is_boundary[d_idx] = 1
+
+            for i in range(N_NBRS):
+                s_idx = NBRS[i]
+                if s_idx != d_idx:
+                    xij[0] = d_x[d_idx] - s_x[s_idx]
+                    xij[1] = d_y[d_idx] - s_y[s_idx]
+                    xij[2] = d_z[d_idx] - s_z[s_idx]
+                    rij = (xij[0]**2. + xij[1]**2. + xij[2]**2.)**0.5
+
+                    # dot product between the vector and line joining sidx
+                    dot = -(d_normal[idx3] * xij[0] + d_normal[idx3 + 1] *
+                            xij[1] + d_normal[idx3 + 2] * xij[2])
+
+                    fac = dot / rij
+
+                    if fac > 0.5:
+                        d_is_boundary[d_idx] = 0
+                        break
+
+
+class SetHIJForInsideParticles(Equation):
+    def __init__(self, dest, sources, h, kernel_factor):
+        # h value of usual particle
+        self.h = h
+        # depends on the kernel used
+        self.kernel_factor = kernel_factor
+        super(SetHIJForInsideParticles, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_h_b):
+        # back ground pressure h (This will be the usual h value)
+        d_h_b[d_idx] = self.h
+
+    def loop_all(self, d_idx, d_x, d_y, d_z, d_rho, d_h, d_is_boundary,
+                 d_normal, d_normal_norm, d_h_b, s_m, s_x, s_y, s_z, s_h,
+                 s_is_boundary, SPH_KERNEL, NBRS, N_NBRS):
+        i = declare('int')
+        s_idx = declare('int')
+        xij = declare('matrix(3)')
+
+        # if the particle is boundary set it's h_b to be zero
+        if d_is_boundary[d_idx] == 1:
+            d_h_b[d_idx] = 0.
+        # if it is not the boundary then set its h_b according to the minimum
+        # distance to the boundary particle
+        else:
+            # get the minimum distance to the boundary particle
+            min_dist = 0
+            for i in range(N_NBRS):
+                s_idx = NBRS[i]
+
+                if s_is_boundary[s_idx] == 1:
+                    # find the distance
+                    xij[0] = d_x[d_idx] - s_x[s_idx]
+                    xij[1] = d_y[d_idx] - s_y[s_idx]
+                    xij[2] = d_z[d_idx] - s_z[s_idx]
+                    rij = sqrt(xij[0]**2. + xij[1]**2. + xij[2]**2.)
+
+                    if rij > min_dist:
+                        min_dist = rij
+
+            # doing this out of desperation
+            for i in range(N_NBRS):
+                s_idx = NBRS[i]
+
+                if s_is_boundary[s_idx] == 1:
+                    # find the distance
+                    xij[0] = d_x[d_idx] - s_x[s_idx]
+                    xij[1] = d_y[d_idx] - s_y[s_idx]
+                    xij[2] = d_z[d_idx] - s_z[s_idx]
+                    rij = sqrt(xij[0]**2. + xij[1]**2. + xij[2]**2.)
+
+                    if rij < min_dist:
+                        min_dist = rij
+
+            if min_dist > 0.:
+                d_h_b[d_idx] = min_dist / self.kernel_factor + min_dist / 50
 
 
 # normal[::3], normal[1::3], normal[2::3]
