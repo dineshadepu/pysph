@@ -24,6 +24,15 @@ def add_ctvf_properties(pa):
     pa.add_property('avhat')
     pa.add_property('awhat')
 
+    # for normals
+    pa.add_property('normal', stride=3)
+    pa.add_property('normal_tmp', stride=3)
+    pa.add_property('normal_norm')
+
+    # check for boundary particle
+    pa.add_property('is_boundary', type='int')
+    pa.add_property('is_boundary_second', type='int')
+
 
 class SummationDensityTmp(Equation):
     def initialize(self, d_idx, d_rho_tmp):
@@ -70,7 +79,8 @@ class MomentumEquationPressureGradientCTVF(Equation):
         self.gy = gy
         self.gz = gz
         self.rho = rho
-        super(MomentumEquationPressureGradientCTVF, self).__init__(dest, sources)
+        super(MomentumEquationPressureGradientCTVF,
+              self).__init__(dest, sources)
 
     def initialize(self, d_idx, d_au, d_av, d_aw, d_auhat, d_avhat, d_awhat,
                    d_p):
@@ -82,15 +92,17 @@ class MomentumEquationPressureGradientCTVF(Equation):
         d_avhat[d_idx] = 0.0
         d_awhat[d_idx] = 0.0
 
-    def loop(self, d_rho, s_rho, d_idx, d_rho_tmp, s_idx, d_p, s_p, s_m, d_au, d_av,
-             d_aw, DWIJ, d_p0, d_auhat, d_avhat, d_awhat, XIJ, RIJ, SPH_KERNEL,
-             HIJ):
+    def loop(self, d_rho, s_rho, d_idx, d_rho_tmp, s_idx, d_p, s_p, s_m, d_au,
+             d_av, d_aw, DWIJ, d_p0, d_auhat, d_avhat, d_awhat, XIJ, RIJ,
+             SPH_KERNEL, d_normal, d_normal_norm, HIJ):
         dwijhat = declare('matrix(3)')
+        idx3 = declare('int')
+        idx3 = 3 * d_idx
 
         rhoi2 = d_rho[d_idx] * d_rho[d_idx]
         rhoj2 = s_rho[s_idx] * s_rho[s_idx]
 
-        pij = d_p[d_idx]/rhoi2 + s_p[s_idx]/rhoj2
+        pij = d_p[d_idx] / rhoi2 + s_p[s_idx] / rhoj2
 
         tmp = -s_m[s_idx] * pij
 
@@ -98,15 +110,21 @@ class MomentumEquationPressureGradientCTVF(Equation):
         d_av[d_idx] += tmp * DWIJ[1]
         d_aw[d_idx] += tmp * DWIJ[2]
 
-        # if d_rho_tmp[d_idx] > 0.95 * self.rho:
+        # compute the magnitude of the normal
 
-        tmp = -self.pb * s_m[s_idx]/rhoi2
+        normal_norm = (d_normal[idx3]**2. + d_normal[idx3 + 1]**2. +
+                       d_normal[idx3 + 2]**2.)
 
-        SPH_KERNEL.gradient(XIJ, RIJ, HIJ, dwijhat)
+        d_normal_norm[d_idx] = normal_norm
 
-        d_auhat[d_idx] += tmp * dwijhat[0]
-        d_avhat[d_idx] += tmp * dwijhat[1]
-        d_awhat[d_idx] += tmp * dwijhat[2]
+        if normal_norm < 1e-12:
+            tmp = -self.pb * s_m[s_idx] / rhoi2
+
+            SPH_KERNEL.gradient(XIJ, RIJ, HIJ, dwijhat)
+
+            d_auhat[d_idx] += tmp * dwijhat[0]
+            d_avhat[d_idx] += tmp * dwijhat[1]
+            d_awhat[d_idx] += tmp * dwijhat[2]
 
 
 class PsuedoForceOnFreeSurface(Equation):
@@ -164,3 +182,97 @@ class PsuedoForceOnFreeSurface(Equation):
                         d_auhat[d_idx] += tmp * dwijhat[0]
                         d_avhat[d_idx] += tmp * dwijhat[1]
                         d_awhat[d_idx] += tmp * dwijhat[2]
+
+
+class IdentifyBoundaryParticle1(Equation):
+    def __init__(self, dest, sources, fac):
+        self.fac = fac
+        super(IdentifyBoundaryParticle1, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_is_boundary):
+        # set all of them to be boundary
+        d_is_boundary[d_idx] = 0
+
+    def loop_all(self, d_idx, d_x, d_y, d_z, d_rho, d_h, d_is_boundary,
+                 d_normal, d_normal_norm, s_m, s_x, s_y, s_z, s_h, SPH_KERNEL,
+                 NBRS, N_NBRS):
+        i = declare('int')
+        idx3 = declare('int')
+        s_idx = declare('int')
+        xij = declare('matrix(3)')
+        idx3 = 3 * d_idx
+
+        normal_norm = (d_normal[idx3]**2. + d_normal[idx3 + 1]**2. +
+                       d_normal[idx3 + 2]**2.)
+
+        d_normal_norm[d_idx] = normal_norm
+
+        if d_normal_norm[d_idx] > 1e-12:
+            d_is_boundary[d_idx] = 1
+
+        for i in range(N_NBRS):
+            s_idx = NBRS[i]
+            if s_idx != d_idx:
+                xij[0] = d_x[d_idx] - s_x[s_idx]
+                xij[1] = d_y[d_idx] - s_y[s_idx]
+                xij[2] = d_z[d_idx] - s_z[s_idx]
+                # rij = xij[0]**2. + xij[1]**2. + xij[2]**2.
+
+                if d_is_boundary[d_idx] == 1:
+                    xijdotnormal = -(d_normal[idx3] * xij[0] +
+                                     d_normal[idx3 + 1] * xij[1] +
+                                     d_normal[idx3 + 2] * xij[2])
+
+                    if xijdotnormal > self.fac:
+                        d_is_boundary[d_idx] = 0
+                        break
+
+
+class IdentifyBoundaryParticle2(Equation):
+    def __init__(self, dest, sources, fac):
+        self.fac = fac
+        super(IdentifyBoundaryParticle2, self).__init__(dest, sources)
+
+    def initialize(self, d_idx, d_is_boundary, d_is_boundary_second):
+        # set all of them to be boundary
+        d_is_boundary_second[d_idx] = d_is_boundary[d_idx]
+
+    def loop_all(self, d_idx, d_x, d_y, d_z, d_rho, d_h, d_is_boundary, d_is_boundary_second,
+                 d_normal, d_normal_norm, s_m, s_x, s_y, s_z, s_h, s_is_boundary, SPH_KERNEL,
+                 NBRS, N_NBRS):
+        i = declare('int')
+        idx3 = declare('int')
+        s_idx = declare('int')
+        xij = declare('matrix(3)')
+        idx3 = 3 * d_idx
+
+        normal_norm = (d_normal[idx3]**2. + d_normal[idx3 + 1]**2. +
+                       d_normal[idx3 + 2]**2.)
+
+        d_normal_norm[d_idx] = normal_norm
+
+        if d_normal_norm[d_idx] > 1e-12:
+            # if it is not a boundary
+            if d_is_boundary[d_idx] == 0:
+                for i in range(N_NBRS):
+                    s_idx = NBRS[i]
+                    if s_idx != d_idx:
+                        xij[0] = d_x[d_idx] - s_x[s_idx]
+                        xij[1] = d_y[d_idx] - s_y[s_idx]
+                        xij[2] = d_z[d_idx] - s_z[s_idx]
+                        xijdotnormal = -(d_normal[idx3] * xij[0] +
+                                         d_normal[idx3 + 1] * xij[1] +
+                                         d_normal[idx3 + 2] * xij[2])
+
+                        if s_is_boundary[s_idx] == 1 and xijdotnormal < self.fac:
+                            d_is_boundary_second[d_idx] = 1
+                            break
+
+    def post_loop(self, d_idx, d_is_boundary, d_is_boundary_second):
+        # set all of them to be boundary
+        d_is_boundary[d_idx] = d_is_boundary_second[d_idx]
+
+
+# normal[::3], normal[1::3], normal[2::3]
+# grad_rho_x, grad_rho_y, grad_rho_z
+# auhat, avhat, awhat

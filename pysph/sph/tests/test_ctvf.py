@@ -63,7 +63,7 @@ def create_sin(dx, L):
 
     sin_indices = []
     for i in range(0, len(x)):
-        if y[i] < L / 2. + np.sin(x[i]):
+        if y[i] < L / 2. + np.sin(np.pi * x[i]):
             sin_indices.append(i)
 
     return x[sin_indices], y[sin_indices]

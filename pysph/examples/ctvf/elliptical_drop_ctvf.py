@@ -41,6 +41,9 @@ from pysph.sph.ctvf import (SummationDensityTmp, GradientRhoTmp,
                             MinNeighbourRho, add_ctvf_properties,
                             MomentumEquationPressureGradientCTVF)
 
+# for normals
+from pysph.sph.isph.wall_normal import ComputeNormals, SmoothNormals
+
 # for benchmarking
 from pysph.examples.elliptical_drop import (exact_solution)
 
@@ -114,8 +117,16 @@ class EllipticalDrop(Application):
                     ContinuityEquationGTVF(dest='fluid', sources=['fluid']),
 
                     # For CTVF
-                    SummationDensityTmp(dest='fluid', sources=['fluid'])
-                ], )
+                    ComputeNormals(dest='fluid', sources=['fluid'])
+                ],
+            ),
+
+            Group(
+                equations=[
+                    # For CTVF
+                    SmoothNormals(dest='fluid', sources=['fluid'])
+                ],
+            )
         ]
 
         stage2 = [
@@ -124,8 +135,8 @@ class EllipticalDrop(Application):
                     CorrectDensity(dest='fluid', sources=['fluid']),
 
                     # For CTVF
-                    MinNeighbourRho(dest='fluid', sources=['fluid']),
-                    GradientRhoTmp(dest='fluid', sources=['fluid'])
+                    # MinNeighbourRho(dest='fluid', sources=['fluid']),
+                    # GradientRhoTmp(dest='fluid', sources=['fluid'])
                 ], ),
             Group(
                 equations=[
@@ -143,12 +154,12 @@ class EllipticalDrop(Application):
                 ], ),
 
             # for CTVF
-            Group(
-                equations=[
-                    PsuedoForceOnFreeSurface(dest='fluid', sources=['fluid'],
-                                             dx=self.dx, m0=self.m0,
-                                             pb=self.pb, rho=self.rho0)
-                ], ),
+            # Group(
+            #     equations=[
+            #         PsuedoForceOnFreeSurface(dest='fluid', sources=['fluid'],
+            #                                  dx=self.dx, m0=self.m0,
+            #                                  pb=self.pb, rho=self.rho0)
+            #     ], ),
         ]
         return MultiStageEquations([stage1, stage2])
 
@@ -215,4 +226,3 @@ if __name__ == '__main__':
     app = EllipticalDrop()
     app.run()
     app.post_process(app.info_filename)
-# grad_rho_x, grad_rho_y, grad_rho_z

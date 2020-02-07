@@ -16,7 +16,7 @@ from pysph.base.kernels import QuinticSpline
 from pysph.solver.application import Application
 from pysph.solver.solver import Solver
 
-from pysph.sph.equation import Group
+from pysph.sph.equation import Group, MultiStageEquations
 from pysph.tools.sph_evaluator import SPHEvaluator
 from pysph.base.utils import (get_particle_array_tvf_fluid,
                               get_particle_array_tvf_solid)
@@ -25,134 +25,137 @@ from pysph.sph.ctvf import (SummationDensityTmp, GradientRhoTmp,
                             MinNeighbourRho)
 
 from pysph.base.kernels import QuinticSpline
-from pysph.sph.integrator_step import TransportVelocityStep
-from pysph.sph.integrator import PECIntegrator
 
-# imports for TVF
+# tvf
 from pysph.sph.wc.transport_velocity import (
-    SummationDensity, StateEquation, MomentumEquationPressureGradient,
-    MomentumEquationArtificialViscosity, MomentumEquationViscosity,
-    MomentumEquationArtificialStress, SolidWallPressureBC, SolidWallNoSlipBC,
-    SetWallVelocity)
+    StateEquation, SetWallVelocity, SolidWallPressureBC, VolumeSummation,
+    SolidWallNoSlipBC, MomentumEquationArtificialViscosity, ContinuitySolid)
 
-# imports for CTVF
+# gtvf
+from pysph.sph.wc.gtvf import (get_particle_array_gtvf, GTVFIntegrator,
+                               GTVFStep, ContinuityEquationGTVF,
+                               CorrectDensity,
+                               MomentumEquationArtificialStress,
+                               MomentumEquationViscosity)
+
 from pysph.sph.ctvf import (SummationDensityTmp, GradientRhoTmp,
-                            PsuedoForceOnFreeSurface, add_ctvf_properties,
-                            MinNeighbourRho)
+                            PsuedoForceOnFreeSurface, MinNeighbourRho,
+                            add_ctvf_properties,
+                            MomentumEquationPressureGradientCTVF)
 
-from pysph.tools.geometry import get_2d_block
+# for normals
+from pysph.sph.isph.wall_normal import ComputeNormals, SmoothNormals
+
+# geometry
 from pysph.tools.geometry import get_2d_tank, get_2d_block
 
 
 class DamBreak2D(Application):
     def initialize(self):
-        self.Umax = (4. * 9.81)**0.5
-        self.c0 = 10 * self.Umax
-        self.rho0 = 1000.0
-        self.p0 = self.c0 * self.c0 * self.rho0
-        print(self.p0)
-        self.pb = 10
-        self.dx = 0.1
-        self.volume = self.dx**2.
+        self.fluid_column_height = 2.0
+        self.fluid_column_width = 1.0
+        self.container_height = 4.0
+        self.container_width = 4.0
+        self.ntank_layers = 4
+        self.nu = 0.0
+        self.dx = 0.03
+        self.g = 9.81
+        self.rho = 1000.0
+        self.vref = np.sqrt(2 * 9.81 * self.fluid_column_height)
+        self.co = 10.0 * self.vref
+        self.gamma = 7.0
+        self.alpha = 0.1
+        self.beta = 0.0
+        self.B = self.co * self.co * self.rho / self.gamma
+        self.p0 = self.rho * self.co**2. / self.gamma
+        self.b = 1
+        self.hdx = 1.3
+        self.h = self.hdx * self.dx
+        self.m = self.dx**2 * self.rho
 
     def create_particles(self):
-        dx = self.dx
-        tank_length = 4.
-        tank_height = 4.
-        # center = [0.0, 0.0]
-        # x, y = create_circle(2. * rad, dx)
-        rho = 1000.
-        m = rho * dx**2.
-        h = 1.2 * dx
+        xt, yt = get_2d_tank(dx=self.dx, length=self.container_width,
+                             height=self.container_height, base_center=[2, 0],
+                             num_layers=self.ntank_layers)
+        xf, yf = get_2d_block(dx=self.dx, length=self.fluid_column_width,
+                              height=self.fluid_column_height, center=[0.5, 1])
 
-        fluid_length = 2.
-        fluid_height = 2.
+        xf += self.dx
+        yf += self.dx
 
-        xt, yt = get_2d_tank(dx, length=tank_length, height=tank_height,
-                             base_center=[2, 0], num_layers=2)
-
-        xf, yf = get_2d_block(dx=dx, length=fluid_length, height=fluid_height,
-                              center=[0.5, 1])
-
-        xf += 6. * dx
-        yf += 1. * dx
-
-        fluid = get_particle_array_tvf_fluid(x=xf, y=yf, m=m, h=h, rho=rho,
-                                             name="fluid")
-        tank = get_particle_array_tvf_solid(x=xt, y=yt, m=m, h=h, rho=rho,
-                                            name="tank")
+        fluid = get_particle_array_gtvf(name='fluid', x=xf, y=yf,
+                                        h=self.h, m=self.m, rho=self.rho)
+        tank = get_particle_array_tvf_solid(name='tank', x=xt, y=yt,
+                                            h=self.h, m=self.m,
+                                            rho=self.rho)
+        tank.add_property('rho0')
 
         add_ctvf_properties(fluid)
         add_ctvf_properties(tank)
-
-        # volume is set as dx^2
-        fluid.V[:] = 1. / dx**2.
-        tank.V[:] = 1. / dx**2.
 
         return [fluid, tank]
 
     def create_solver(self):
         kernel = QuinticSpline(dim=2)
 
-        integrator = PECIntegrator(fluid=TransportVelocityStep())
+        integrator = GTVFIntegrator(fluid=GTVFStep())
 
         # dt = 5e-6
-        dt = 1e-5
-        tf = 0.0076
+        dt = 1e-4
+        tf = 1.
         solver = Solver(kernel=kernel, dim=2, integrator=integrator, dt=dt,
-                        tf=tf, adaptive_timestep=True, cfl=0.3, n_damp=50)
+                        tf=tf)
 
         return solver
 
     def create_equations(self):
-        equations = [
+        stage1 = [
+            Group(equations=[SetWallVelocity(dest='tank',
+                                             sources=['fluid'])], ),
             Group(
                 equations=[
-                    SummationDensity(dest='fluid', sources=['fluid', 'tank']),
+                    ContinuityEquationGTVF(dest='fluid', sources=['fluid']),
+                    ContinuitySolid(dest='fluid', sources=['tank']),
 
-                    # Added for CTVF
-                    SummationDensityTmp(dest='fluid',
-                                        sources=['fluid', 'tank']),
-                    SummationDensityTmp(dest='tank', sources=['fluid',
-                                                              'tank']),
+                    # For CTVF
+                    ComputeNormals(dest='fluid', sources=['tank', 'fluid'])
                 ], ),
-            Group(
-                equations=[
-                    StateEquation(dest='fluid', sources=None, p0=self.p0,
-                                  rho0=self.rho0, b=1.0),
-                    SetWallVelocity(dest='tank', sources=['fluid'])
-                ], ),
-            Group(
-                equations=[
-                    SolidWallPressureBC(dest='tank', sources=['fluid'],
-                                        rho0=self.rho0, p0=self.p0, b=1.0,
-                                        gy=-9.81)
-                ], ),
-            Group(
-                equations=[
-                    MomentumEquationPressureGradient(dest='fluid',
-                                                     sources=['fluid', 'tank'],
-                                                     pb=self.p0, gy=-9.81,
-                                                     tdamp=0.0),
-                    MomentumEquationViscosity(dest='fluid', sources=['fluid'],
-                                              nu=0.01),
-                    SolidWallNoSlipBC(dest='fluid', sources=['tank'], nu=0.01),
-                    MomentumEquationArtificialStress(dest='fluid',
-                                                     sources=['fluid']),
 
-                    # Added for CTVF
-                    MinNeighbourRho(dest='fluid', sources=['fluid']),
-                    GradientRhoTmp(dest='fluid', sources=['fluid', 'tank'])
-                ], ),
             Group(
                 equations=[
-                    PsuedoForceOnFreeSurface(
-                        dest='fluid', sources=['fluid'], dx=self.dx, m0=self.m0,
-                        pb=self.pb, rho=self.rho
-),
-                ], ),
+                    # For CTVF
+                    SmoothNormals(dest='fluid', sources=['fluid'])
+                ],
+            )
         ]
-        return equations
+
+        stage2 = [
+            Group(
+                equations=[
+                    CorrectDensity(dest='fluid', sources=['fluid', 'tank'])
+                ], ),
+            Group(
+                equations=[
+                    StateEquation(dest='fluid', sources=None,
+                                  p0=self.p0, rho0=self.rho, b=self.b)
+                ], ),
+            Group(
+                equations=[
+                    VolumeSummation(dest='tank', sources=['fluid', 'tank']),
+                    SolidWallPressureBC(dest='tank', sources=['fluid'],
+                                        rho0=self.rho, p0=self.p0,
+                                        b=self.b, gy=-9.81)
+                ], ),
+            Group(
+                equations=[
+                    MomentumEquationPressureGradientCTVF(
+                        dest='fluid', sources=['fluid', 'tank'],
+                        pb=self.p0, rho=self.rho, gy=-9.81),
+                    MomentumEquationArtificialStress(dest='fluid',
+                                                     sources=['fluid'], dim=2)
+                ], )
+        ]
+        return MultiStageEquations([stage1, stage2])
 
 
 if __name__ == '__main__':
