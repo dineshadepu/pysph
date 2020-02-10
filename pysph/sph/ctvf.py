@@ -98,10 +98,10 @@ class MomentumEquationPressureGradientCTVF(Equation):
 
     def loop(self, d_rho, s_rho, d_idx, d_rho_tmp, s_idx, d_p, s_p, s_m, d_au,
              d_av, d_aw, DWIJ, d_p0, d_auhat, d_avhat, d_awhat, XIJ, RIJ,
-             SPH_KERNEL, d_normal, d_normal_norm, HIJ):
+             SPH_KERNEL, d_normal, d_normal_norm, d_h_b, HIJ):
         dwijhat = declare('matrix(3)')
-        idx3 = declare('int')
-        idx3 = 3 * d_idx
+        # idx3 = declare('int')
+        # idx3 = 3 * d_idx
 
         rhoi2 = d_rho[d_idx] * d_rho[d_idx]
         rhoj2 = s_rho[s_idx] * s_rho[s_idx]
@@ -116,19 +116,26 @@ class MomentumEquationPressureGradientCTVF(Equation):
 
         # compute the magnitude of the normal
 
-        normal_norm = (d_normal[idx3]**2. + d_normal[idx3 + 1]**2. +
-                       d_normal[idx3 + 2]**2.)
+        # normal_norm = (d_normal[idx3]**2. + d_normal[idx3 + 1]**2. +
+        #                d_normal[idx3 + 2]**2.)
 
-        d_normal_norm[d_idx] = normal_norm
+        # d_normal_norm[d_idx] = normal_norm
 
-        if normal_norm < 1e-12:
+        if d_h_b[d_idx] > 0.:
             tmp = -self.pb * s_m[s_idx] / rhoi2
-
-            SPH_KERNEL.gradient(XIJ, RIJ, HIJ, dwijhat)
+            SPH_KERNEL.gradient(XIJ, RIJ, d_h_b[d_idx], dwijhat)
 
             d_auhat[d_idx] += tmp * dwijhat[0]
             d_avhat[d_idx] += tmp * dwijhat[1]
             d_awhat[d_idx] += tmp * dwijhat[2]
+
+        # Without ctvf h value
+        # tmp = -self.pb * s_m[s_idx] / rhoi2
+        # SPH_KERNEL.gradient(XIJ, RIJ, HIJ, dwijhat)
+
+        # d_auhat[d_idx] += tmp * dwijhat[0]
+        # d_avhat[d_idx] += tmp * dwijhat[1]
+        # d_awhat[d_idx] += tmp * dwijhat[2]
 
 
 class PsuedoForceOnFreeSurface(Equation):

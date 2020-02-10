@@ -1,4 +1,4 @@
-"""Elliptical Drop with CTVF
+"""Retain a circle inside a fluid
 
 This shows how one can explicitly setup equations and the solver instead of
 using a scheme.
@@ -44,9 +44,6 @@ from pysph.sph.ctvf import (SummationDensityTmp, GradientRhoTmp,
 from pysph.sph.ctvf import (IdentifyBoundaryParticle2,
                             IdentifyBoundaryParticleCosAngle,
                             SetHIJForInsideParticles)
-
-from pysph.sph.basic_equations import (ContinuityEquation)
-
 # for normals
 from pysph.sph.isph.wall_normal import ComputeNormals, SmoothNormals
 
@@ -54,7 +51,7 @@ from pysph.sph.isph.wall_normal import ComputeNormals, SmoothNormals
 from pysph.examples.elliptical_drop import (exact_solution)
 
 
-class EllipticalDrop(Application):
+class RetainGaps(Application):
     def initialize(self):
         self.co = 1400.0
         self.rho = 1.0
@@ -78,22 +75,23 @@ class EllipticalDrop(Application):
         rho = self.rho
         name = 'fluid'
         x, y = mgrid[-1.05:1.05 + 1e-4:dx, -1.05:1.05 + 1e-4:dx]
+
         # Get the particles inside the circle.
-        condition = ~((x * x + y * y - 1.0) > 1e-10)
+        condition = ~((x * x + y * y - 1.0) < 1e-10)
         x = x[condition].ravel()
         y = y[condition].ravel()
 
         m = ones_like(x) * dx * dx * rho
         h = ones_like(x) * hdx * dx
         rho = ones_like(x) * rho
-        u = -100 * x
-        v = 100 * y
+        u = 0.
+        v = 0.
 
         pa = get_particle_array_gtvf(x=x, y=y, m=m, rho=rho, h=h, u=u, v=v,
                                      name=name)
         add_ctvf_properties(pa)
 
-        print("Elliptical drop :: %d particles" %
+        print("Stationary Square fluid :: %d particles" %
               (pa.get_number_of_particles()))
 
         # add requisite variables needed for this formulation
@@ -124,8 +122,7 @@ class EllipticalDrop(Application):
         stage1 = [
             Group(
                 equations=[
-                    # ContinuityEquationGTVF(dest='fluid', sources=['fluid']),
-                    ContinuityEquation(dest='fluid', sources=['fluid']),
+                    ContinuityEquationGTVF(dest='fluid', sources=['fluid']),
 
                     # For CTVF
                     ComputeNormals(dest='fluid', sources=['fluid'])
@@ -137,10 +134,12 @@ class EllipticalDrop(Application):
                 ], ),
 
             Group(equations=[
+                # For CTVF
                 IdentifyBoundaryParticleCosAngle(dest='fluid',
                                                  sources=['fluid'])
             ]),
 
+            # don't use this.
             # Group(equations=[IdentifyBoundaryParticle2(dest='fluid', sources=['fluid'], fac=self.fac)]),
 
             Group(equations=[
@@ -151,14 +150,11 @@ class EllipticalDrop(Application):
         ]
 
         stage2 = [
-            # Group(
-            #     equations=[
-            #         CorrectDensity(dest='fluid', sources=['fluid']),
+            Group(
+                equations=[
+                    CorrectDensity(dest='fluid', sources=['fluid']),
 
-            #         # For CTVF
-            #         # MinNeighbourRho(dest='fluid', sources=['fluid']),
-            #         # GradientRhoTmp(dest='fluid', sources=['fluid'])
-            #     ], ),
+                ], ),
             Group(
                 equations=[
                     StateEquation(dest='fluid', sources=None, p0=self.p0,
@@ -245,9 +241,9 @@ class EllipticalDrop(Application):
 
 
 if __name__ == '__main__':
-    app = EllipticalDrop()
+    app = RetainGaps()
     app.run()
-    app.post_process(app.info_filename)
+    # app.post_process(app.info_filename)
 
 
 # Semi-major axis length (exact, computed) = 1.9445172415576217, 1.9567269643753342

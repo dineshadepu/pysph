@@ -43,6 +43,12 @@ from pysph.sph.ctvf import (SummationDensityTmp, GradientRhoTmp,
                             add_ctvf_properties,
                             MomentumEquationPressureGradientCTVF)
 
+from pysph.sph.ctvf import (IdentifyBoundaryParticle2,
+                            IdentifyBoundaryParticleCosAngle,
+                            SetHIJForInsideParticles)
+
+from pysph.sph.basic_equations import (ContinuityEquation)
+
 # for normals
 from pysph.sph.isph.wall_normal import ComputeNormals, SmoothNormals
 
@@ -59,6 +65,7 @@ class DamBreak2D(Application):
         self.ntank_layers = 4
         self.nu = 0.0
         self.dx = 0.03
+        self.fac = self.dx/2.
         self.g = 9.81
         self.rho = 1000.0
         self.vref = np.sqrt(2 * 9.81 * self.fluid_column_height)
@@ -71,6 +78,7 @@ class DamBreak2D(Application):
         self.b = 1
         self.hdx = 1.3
         self.h = self.hdx * self.dx
+        self.kernel_factor = 3
         self.m = self.dx**2 * self.rho
 
     def create_particles(self):
@@ -102,7 +110,7 @@ class DamBreak2D(Application):
 
         # dt = 5e-6
         dt = 1e-4
-        tf = 1.
+        tf = 2.5
         solver = Solver(kernel=kernel, dim=2, integrator=integrator, dt=dt,
                         tf=tf)
 
@@ -114,7 +122,8 @@ class DamBreak2D(Application):
                                              sources=['fluid'])], ),
             Group(
                 equations=[
-                    ContinuityEquationGTVF(dest='fluid', sources=['fluid']),
+                    # ContinuityEquationGTVF(dest='fluid', sources=['fluid']),
+                    ContinuityEquation(dest='fluid', sources=['fluid']),
                     ContinuitySolid(dest='fluid', sources=['tank']),
 
                     # For CTVF
@@ -126,14 +135,27 @@ class DamBreak2D(Application):
                     # For CTVF
                     SmoothNormals(dest='fluid', sources=['fluid'])
                 ],
-            )
+            ),
+
+            Group(equations=[
+                IdentifyBoundaryParticleCosAngle(dest='fluid',
+                                                 sources=['fluid'])
+            ]),
+
+            Group(equations=[IdentifyBoundaryParticle2(dest='fluid', sources=['fluid'], fac=self.fac)]),
+
+            Group(equations=[
+                SetHIJForInsideParticles(dest='fluid', sources=[
+                    'fluid'
+                ], h=self.h, kernel_factor=self.kernel_factor)
+            ]),
         ]
 
         stage2 = [
-            Group(
-                equations=[
-                    CorrectDensity(dest='fluid', sources=['fluid', 'tank'])
-                ], ),
+            # Group(
+            #     equations=[
+            #         CorrectDensity(dest='fluid', sources=['fluid', 'tank'])
+            #     ], ),
             Group(
                 equations=[
                     StateEquation(dest='fluid', sources=None,
@@ -148,11 +170,13 @@ class DamBreak2D(Application):
                 ], ),
             Group(
                 equations=[
+                    MomentumEquationArtificialViscosity(
+                        dest='fluid', sources=['fluid', 'tank'], alpha=self.alpha, c0=self.co),
                     MomentumEquationPressureGradientCTVF(
                         dest='fluid', sources=['fluid', 'tank'],
                         pb=self.p0, rho=self.rho, gy=-9.81),
                     MomentumEquationArtificialStress(dest='fluid',
-                                                     sources=['fluid'], dim=2)
+                                                     sources=['fluid'], dim=2),
                 ], )
         ]
         return MultiStageEquations([stage1, stage2])
